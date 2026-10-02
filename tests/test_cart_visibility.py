@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 
-def test_my_cart_queries_only_active_items(monkeypatch):
+def test_my_cart_lists_all_cart_rows_because_is_active_is_checkout_selection(monkeypatch):
     import importlib
 
     my_cart_module = importlib.import_module("app.services.cart_services.my_cart")
@@ -39,6 +39,7 @@ def test_my_cart_queries_only_active_items(monkeypatch):
             return FakeExecuteResult()
 
     monkeypatch.setattr(my_cart_module, "redis_client", None)
+    monkeypatch.setattr(my_cart_module, "_delete_stale_checked_out_cart_rows", lambda db, user_id: 0)
     monkeypatch.setattr(
         my_cart_module,
         "CartProductModel",
@@ -53,5 +54,5 @@ def test_my_cart_queries_only_active_items(monkeypatch):
 
     assert result.error is None
     assert ("customer_id", "user-1") in where_args
-    assert ("is_active", True) in where_args
+    assert ("is_active", True) not in where_args
     assert result.data.data == []
