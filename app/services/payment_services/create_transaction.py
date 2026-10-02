@@ -24,6 +24,40 @@ from app.utils.result import build, Result
 logger = logging.getLogger("midtrans")
 
 
+def _payment_status_value(payment: PaymentModel) -> str:
+    return str(getattr(payment, "transaction_status", "") or "").split(".")[-1].lower()
+
+
+def _existing_pending_payment_response(payment: PaymentModel) -> PaymentInfoResponseDto | None:
+    """
+    Reuse an unfinished Midtrans Snap transaction.
+
+    Midtrans rejects creating a new transaction with the same order_id while the
+    old one is still pending. Customers who close GoPay/Snap and press
+    "Lanjutkan Pembayaran" must be sent back to the stored redirect URL instead
+    of creating another Midtrans transaction.
+    """
+    if _payment_status_value(payment) != "pending":
+        return None
+
+    response_payload = payment.payment_response or {}
+    redirect_url = response_payload.get("redirect_url")
+    token = response_payload.get("token") or payment.transaction_id
+    if not redirect_url or not token:
+        return None
+
+    return PaymentInfoResponseDto(
+        status_code=200,
+        message="Existing pending payment reused",
+        data=PaymentMidtransResponseDTO(
+            transaction_id=payment.transaction_id,
+            redirect_url=redirect_url,
+            token=token,
+            transaction_status="pending",
+        ),
+    )
+
+
 def _extract_shipping_fee_payment(notes: str | None) -> str:
     match = re.search(r'\[SHIPPING_FEE_PAYMENT:\s*([^\]]+)\]', notes or '', re.IGNORECASE)
     mode = (match.group(1).strip().lower() if match else 'prepaid')
@@ -105,6 +139,15 @@ def create_transaction(
                 )
             )
 
+        existing_payment = db.execute(
+            select(PaymentModel).where(PaymentModel.order_id == order.id)
+        ).scalars().first()
+
+        if existing_payment:
+            reusable_payment = _existing_pending_payment_response(existing_payment)
+            if reusable_payment:
+                return build(data=reusable_payment)
+
         existing_order_items = db.execute(
             select(OrderItemModel)
             .options(
@@ -172,10 +215,6 @@ def create_transaction(
             **transaction_response,
             "_amimum_request_payload": transaction_payload,
         }
-        existing_payment = db.execute(
-            select(PaymentModel).where(PaymentModel.order_id == order.id)
-        ).scalars().first()
-
         if existing_payment:
             existing_payment.transaction_id = payment_reference
             existing_payment.gross_amount = payable_amount
