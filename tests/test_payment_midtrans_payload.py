@@ -118,3 +118,43 @@ def test_generate_midtrans_payload_includes_shipping_address_and_product_details
         },
     ]
     assert sum(item["price"] * item["quantity"] for item in payload["item_details"]) == payload["transaction_details"]["gross_amount"]
+
+
+def test_generate_midtrans_payload_uses_explicit_order_items_when_relation_is_empty():
+    order = SimpleNamespace(
+        id="f31eb8e6-0faf-4f1d-abcd-test",
+        total_price=12000,
+        customer_name="Maris",
+        customer_email="maris@example.com",
+        customer_phone="+628****6035",
+        user=SimpleNamespace(
+            firstname="Maris",
+            lastname="",
+            fullname="Maris",
+            address="Alamat akun utama",
+        ),
+        shipments=None,
+        order_items=[],
+    )
+    explicit_items = [
+        SimpleNamespace(
+            id=11,
+            product_id="prod-explicit",
+            product_name="Produk dari Query",
+            variant_product="Botol",
+            quantity=1,
+            total_price=12000,
+            price_per_item=12000,
+        )
+    ]
+
+    payload = generate_midtrans_payload(order, order_items=explicit_items)
+
+    assert payload["item_details"] == [
+        {
+            "id": "prod-explicit",
+            "price": 12000,
+            "quantity": 1,
+            "name": "Produk dari Query - Botol",
+        }
+    ]

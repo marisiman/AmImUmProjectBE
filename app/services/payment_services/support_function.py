@@ -81,10 +81,10 @@ def _build_shipping_address(order: OrderModel) -> dict | None:
     }
 
 
-def _build_item_details(order: OrderModel, gross_amount: int) -> list[dict]:
+def _build_item_details(order: OrderModel, gross_amount: int, order_items=None) -> list[dict]:
     item_details: list[dict] = []
 
-    for item in getattr(order, "order_items", None) or []:
+    for item in order_items or getattr(order, "order_items", None) or []:
         quantity = int(getattr(item, "quantity", 0) or 0)
         if quantity <= 0:
             continue
@@ -126,7 +126,7 @@ def _build_item_details(order: OrderModel, gross_amount: int) -> list[dict]:
     return item_details
 
 
-def generate_midtrans_payload(order: OrderModel) -> dict:
+def generate_midtrans_payload(order: OrderModel, order_items=None) -> dict:
     """
     Membuat payload untuk transaksi Midtrans.
     """
@@ -162,7 +162,7 @@ def generate_midtrans_payload(order: OrderModel) -> dict:
         },
     }
 
-    item_details = _build_item_details(order, gross_amount)
+    item_details = _build_item_details(order, gross_amount, order_items=order_items)
     if item_details:
         payload["item_details"] = item_details
 

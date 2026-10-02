@@ -3,13 +3,14 @@ import re
 from fastapi import HTTPException, status
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import SQLAlchemyError, DataError, IntegrityError
 
 from app.models.payment_model import PaymentModel
 from app.models.order_model import OrderModel
 from app.models.order_item_model import OrderItemModel
 from app.models.cart_product_model import CartProductModel
+from app.models.shipment_model import ShipmentModel
 
 from app.dtos.payment_dtos import PaymentOrderByIdDto, PaymentCreateDto, PaymentMidtransResponseDTO, PaymentInfoResponseDto
 from app.dtos.error_response_dtos import ErrorResponseDto
@@ -67,6 +68,12 @@ def create_transaction(
         # Ambil detail order dari database
         order = db.execute(
             select(OrderModel)
+            .options(
+                selectinload(OrderModel.user),
+                selectinload(OrderModel.shipments).selectinload(ShipmentModel.shipment_address),
+                selectinload(OrderModel.order_items).selectinload(OrderItemModel.products),
+                selectinload(OrderModel.order_items).selectinload(OrderItemModel.pack_type),
+            )
             .filter(
                 OrderModel.id == payment_data.order_id,
                 OrderModel.customer_id == user_id,
@@ -102,7 +109,12 @@ def create_transaction(
             )
 
         existing_order_items = db.execute(
-            select(OrderItemModel).where(OrderItemModel.order_id == order.id)
+            select(OrderItemModel)
+            .options(
+                selectinload(OrderItemModel.products),
+                selectinload(OrderItemModel.pack_type),
+            )
+            .where(OrderItemModel.order_id == order.id)
         ).scalars().all()
 
         if not existing_order_items:
@@ -125,7 +137,7 @@ def create_transaction(
         order.total_price = payable_amount
 
         # Buat payload untuk transaksi Midtrans setelah nominal payable final dihitung.
-        transaction_payload = generate_midtrans_payload(order)
+        transaction_payload = generate_midtrans_payload(order, order_items=existing_order_items)
 
         # Buat transaksi di Midtrans
         try:
