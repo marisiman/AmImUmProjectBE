@@ -44,10 +44,14 @@ def _delete_stale_checked_out_cart_rows(db: Session, user_id: str) -> int:
 
     Historically checkout marked purchased cart rows is_active=False instead of
     deleting them. Some direct-buy retries/duplicates may also leave a stale row
-    active. Because is_active is the checkout checkbox flag (not a durable
-    visibility flag), delete rows only when they can be matched to an order item
-    created after the cart row existed for the same customer/product/variant.
-    This preserves products the customer re-adds after the order was made.
+    active.
+
+    Safe cleanup rules:
+    - inactive rows are stale if the same user already has a matching order item;
+      inactive cart rows are not purchase intent and should not remain visible
+      after checkout/payment.
+    - active rows are only removed when an order was created after the cart row;
+      this preserves products the customer intentionally re-adds after buying.
     """
     stale_rows = db.execute(
         select(CartProductModel)
@@ -60,7 +64,10 @@ def _delete_stale_checked_out_cart_rows(db: Session, user_id: str) -> int:
         .where(
             CartProductModel.customer_id == user_id,
             OrderModel.customer_id == user_id,
-            OrderModel.created_at >= CartProductModel.created_at,
+            (
+                (CartProductModel.is_active == False)
+                | (OrderModel.created_at >= CartProductModel.created_at)
+            ),
         )
     ).scalars().all()
 
