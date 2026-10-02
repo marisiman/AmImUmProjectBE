@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from app.services.payment_services.create_transaction import (
     _build_midtrans_order_id,
     _existing_pending_payment_response,
+    _status_value,
+    NON_RETRYABLE_PAYMENT_ORDER_STATUSES,
 )
 
 
@@ -64,3 +66,23 @@ def test_first_midtrans_order_id_uses_plain_order_uuid():
     order_id = "5ef46775-a393-49e0-8a82-64dabd05a9de"
 
     assert _build_midtrans_order_id(order_id, None) == order_id
+
+
+def test_payment_retry_blocks_only_successful_or_fulfillment_statuses():
+    retryable_statuses = [
+        "pending",
+        "failed",
+        "payment_failed",
+        "expire",
+        "expired",
+        "cancel",
+        "cancelled",
+        "deny",
+        "",
+    ]
+
+    for status in retryable_statuses:
+        assert _status_value(status) not in NON_RETRYABLE_PAYMENT_ORDER_STATUSES
+
+    for status in ["paid", "settlement", "capture", "processing", "shipped", "completed", "refund"]:
+        assert _status_value(status) in NON_RETRYABLE_PAYMENT_ORDER_STATUSES

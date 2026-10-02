@@ -26,7 +26,17 @@ from app.utils.result import build, Result
 # Logger untuk Midtrans
 logger = logging.getLogger("midtrans")
 
-RETRYABLE_ORDER_STATUSES = {"pending", "failed", "cancelled", "canceled", "expire", "expired", "cancel", "deny"}
+NON_RETRYABLE_PAYMENT_ORDER_STATUSES = {
+    "paid",
+    "settlement",
+    "capture",
+    "processing",
+    "shipped",
+    "delivered",
+    "completed",
+    "refund",
+    "refunded",
+}
 
 
 def _status_value(value) -> str:
@@ -149,7 +159,7 @@ def create_transaction(
             )
 
         order_status = _status_value(order.status)
-        if order_status not in RETRYABLE_ORDER_STATUSES:
+        if order_status in NON_RETRYABLE_PAYMENT_ORDER_STATUSES:
             return build(
                 error=HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
