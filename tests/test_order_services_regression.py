@@ -39,6 +39,7 @@ class DummyDB:
         self.execute_results = list(execute_results or [])
         self.query_result = query_result
         self.added = []
+        self.deleted = []
         self.committed = 0
         self.rolled_back = 0
         self.refreshed = []
@@ -55,6 +56,9 @@ class DummyDB:
         if getattr(obj, "id", None) is None and obj.__class__.__name__ == "OrderModel":
             obj.id = "generated-order-id"
         self.added.append(obj)
+
+    def delete(self, obj):
+        self.deleted.append(obj)
 
     def commit(self):
         self.committed += 1
@@ -131,6 +135,8 @@ def test_checkout_creates_order_and_items(monkeypatch, checkout_module, fake_car
     assert result.data["data"]["total_price"] == 11000.0
     assert db.committed == 1
     assert len(db.added) == 2
+    assert db.deleted == [fake_cart_item]
+    assert fake_cart_item.is_active is True
 
 
 def test_checkout_invalidates_cart_and_order_caches(monkeypatch, checkout_module, fake_cart_item):

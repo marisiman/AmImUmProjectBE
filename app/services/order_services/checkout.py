@@ -214,8 +214,9 @@ def checkout(
             )
             db.add(order_item)
 
-            # Prevent the same cart rows from being re-checked out on next transaction
-            item.is_active = False
+            # Cart rows that have been converted into an order must be removed,
+            # not merely deactivated, so purchased products disappear from cart.
+            db.delete(item)
 
         db.commit()
         db.refresh(order)
