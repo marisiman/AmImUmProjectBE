@@ -54,7 +54,10 @@ def my_cart(
         # Query untuk mengambil cart berdasarkan user_id dengan pagination
         cart_items = db.execute(
             select(CartProductModel)
-            .where(CartProductModel.customer_id == user_id)
+            .where(
+                CartProductModel.customer_id == user_id,
+                CartProductModel.is_active == True,
+            )
             .offset(skip)
             .limit(limit)
         ).scalars().all()
