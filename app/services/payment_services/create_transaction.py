@@ -1,5 +1,8 @@
 import logging
 import re
+import random
+import string
+import time
 from fastapi import HTTPException, status
 
 from sqlalchemy import select
@@ -23,9 +26,35 @@ from app.utils.result import build, Result
 # Logger untuk Midtrans
 logger = logging.getLogger("midtrans")
 
+RETRYABLE_ORDER_STATUSES = {"pending", "failed", "cancelled", "canceled", "expire", "expired", "cancel", "deny"}
+
+
+def _status_value(value) -> str:
+    return str(value or "").split(".")[-1].lower()
+
+
+def _base36(value: int) -> str:
+    alphabet = string.digits + string.ascii_lowercase
+    if value <= 0:
+        return "0"
+    digits = []
+    while value:
+        value, remainder = divmod(value, 36)
+        digits.append(alphabet[remainder])
+    return "".join(reversed(digits))
+
+
+def _build_midtrans_order_id(order_id: str, existing_payment: PaymentModel | None) -> str:
+    if not existing_payment:
+        return str(order_id)
+
+    suffix = f"r{_base36(int(time.time()))}{random.randint(100, 999)}"
+    # Keep below Midtrans' practical 50-char order_id limit: UUID36 + '-' + 9-10 chars.
+    return f"{order_id}-{suffix}"[:50]
+
 
 def _payment_status_value(payment: PaymentModel) -> str:
-    return str(getattr(payment, "transaction_status", "") or "").split(".")[-1].lower()
+    return _status_value(getattr(payment, "transaction_status", ""))
 
 
 def _existing_pending_payment_response(payment: PaymentModel) -> PaymentInfoResponseDto | None:
@@ -119,7 +148,8 @@ def create_transaction(
                 )
             )
 
-        if order.status != "pending":
+        order_status = _status_value(order.status)
+        if order_status not in RETRYABLE_ORDER_STATUSES:
             return build(
                 error=HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -176,8 +206,14 @@ def create_transaction(
 
         order.total_price = payable_amount
 
+        midtrans_order_id = _build_midtrans_order_id(str(order.id), existing_payment)
+
         # Buat payload untuk transaksi Midtrans setelah nominal payable final dihitung.
-        transaction_payload = generate_midtrans_payload(order, order_items=existing_order_items)
+        transaction_payload = generate_midtrans_payload(
+            order,
+            order_items=existing_order_items,
+            midtrans_order_id=midtrans_order_id,
+        )
 
         # Buat transaksi di Midtrans
         try:
@@ -214,6 +250,8 @@ def create_transaction(
         stored_payment_response = {
             **transaction_response,
             "_amimum_request_payload": transaction_payload,
+            "_amimum_order_id": str(order.id),
+            "_amimum_midtrans_order_id": midtrans_order_id,
         }
         if existing_payment:
             existing_payment.transaction_id = payment_reference
@@ -230,6 +268,8 @@ def create_transaction(
                 payment_response=stored_payment_response,
             )
             db.add(payment)
+
+        order.status = "pending"
 
         db.commit()
         db.refresh(payment)

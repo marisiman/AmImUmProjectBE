@@ -162,3 +162,29 @@ def test_generate_midtrans_payload_uses_explicit_order_items_when_relation_is_em
         }
     ]
     assert payload["custom_field1"] == "Produk dari Query - Botol x1"
+
+
+def test_generate_midtrans_payload_can_use_retry_midtrans_order_id():
+    order = SimpleNamespace(
+        id="5ef46775-a393-49e0-8a82-64dabd05a9de",
+        total_price=1500,
+        customer_name="Maris",
+        customer_email="maris@example.com",
+        customer_phone="+628****6035",
+        user=None,
+        shipments=None,
+        order_items=[],
+    )
+
+    payload = generate_midtrans_payload(
+        order,
+        midtrans_order_id="5ef46775-a393-49e0-8a82-64dabd05a9de-rabc123",
+    )
+
+    assert payload["transaction_details"] == {
+        "order_id": "5ef46775-a393-49e0-8a82-64dabd05a9de-rabc123",
+        "gross_amount": 1500,
+    }
+    assert payload["callbacks"]["finish"].endswith(
+        "/transaction/5ef46775-a393-49e0-8a82-64dabd05a9de"
+    )

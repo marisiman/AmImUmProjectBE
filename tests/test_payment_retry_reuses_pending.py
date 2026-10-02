@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
-from app.services.payment_services.create_transaction import _existing_pending_payment_response
+from app.services.payment_services.create_transaction import (
+    _build_midtrans_order_id,
+    _existing_pending_payment_response,
+)
 
 
 def test_existing_pending_payment_reuses_stored_midtrans_redirect():
@@ -44,3 +47,20 @@ def test_existing_pending_payment_requires_redirect_url():
     )
 
     assert _existing_pending_payment_response(payment) is None
+
+
+def test_retry_midtrans_order_id_is_unique_and_keeps_order_uuid_prefix():
+    order_id = "5ef46775-a393-49e0-8a82-64dabd05a9de"
+    existing_payment = SimpleNamespace(id="payment-1")
+
+    midtrans_order_id = _build_midtrans_order_id(order_id, existing_payment)
+
+    assert midtrans_order_id.startswith(f"{order_id}-r")
+    assert midtrans_order_id != order_id
+    assert len(midtrans_order_id) <= 50
+
+
+def test_first_midtrans_order_id_uses_plain_order_uuid():
+    order_id = "5ef46775-a393-49e0-8a82-64dabd05a9de"
+
+    assert _build_midtrans_order_id(order_id, None) == order_id

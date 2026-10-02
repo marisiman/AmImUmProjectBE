@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import logging
+import re
 
 import requests
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ from app.libs.redis_config import redis_client
 from app.utils.result import Result, build
 
 logger = logging.getLogger(__name__)
+UUID_PREFIX_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
 def handler_notification(notification_data: dict, db: Session) -> Result[dict, Exception]:
@@ -250,9 +252,19 @@ def fetch_midtrans_transaction_status(order_id: str) -> Result[dict, Exception]:
 
 def get_payment_by_order_id(order_id: str, db: Session) -> PaymentModel:
     """
-    Mengambil data pembayaran berdasarkan order_id.
+    Mengambil data pembayaran berdasarkan order_id aplikasi atau order_id retry Midtrans.
     """
-    return db.execute(select(PaymentModel).where(PaymentModel.order_id == order_id)).scalars().first()
+    payment = db.execute(select(PaymentModel).where(PaymentModel.order_id == order_id)).scalars().first()
+    if payment:
+        return payment
+
+    # Retry payments use Midtrans order_id like <uuid>-r<suffix>. Map it back to
+    # the canonical Amimum order UUID stored in PaymentModel.order_id.
+    match = UUID_PREFIX_RE.match(str(order_id or ""))
+    if not match:
+        return None
+
+    return db.execute(select(PaymentModel).where(PaymentModel.order_id == match.group(0))).scalars().first()
 
 
 def get_order_by_id(order_id: int, db: Session) -> OrderModel:

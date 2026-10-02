@@ -135,7 +135,7 @@ def _build_product_summary(item_details: list[dict]) -> str:
     return _clean_text("; ".join(product_lines), 255)
 
 
-def generate_midtrans_payload(order: OrderModel, order_items=None) -> dict:
+def generate_midtrans_payload(order: OrderModel, order_items=None, midtrans_order_id: str | None = None) -> dict:
     """
     Membuat payload untuk transaksi Midtrans.
     """
@@ -159,7 +159,7 @@ def generate_midtrans_payload(order: OrderModel, order_items=None) -> dict:
 
     payload = {
         "transaction_details": {
-            "order_id": str(order.id),
+            "order_id": str(midtrans_order_id or order.id),
             "gross_amount": gross_amount,
         },
         "credit_card": {
