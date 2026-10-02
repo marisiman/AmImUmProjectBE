@@ -28,15 +28,93 @@ def test_generate_midtrans_payload_sets_finish_callback_to_customer_transaction(
         total_price=18500,
         customer_name="Test Payment",
         customer_email="customer@example.com",
-        customer_phone="+6281234567890",
+        customer_phone="+628****7890",
+        user=SimpleNamespace(
+            firstname="Test",
+            lastname="Payment",
+            fullname="Test Payment",
+            address="Jl. Herbal No. 1",
+        ),
+        shipments=None,
+        order_items=[],
     )
 
     payload = generate_midtrans_payload(order)
 
     assert payload["transaction_details"] == {
         "order_id": "865740b2-8274-4b4c-b18e-bfed0aeaa176",
-        "gross_amount": 18500.0,
+        "gross_amount": 18500,
+    }
+    assert payload["customer_details"]["first_name"] == "Test"
+    assert payload["customer_details"]["last_name"] == "Payment"
+    assert payload["customer_details"]["billing_address"] == {
+        "first_name": "Test",
+        "last_name": "Payment",
+        "phone": "+628****7890",
+        "address": "Jl. Herbal No. 1",
     }
     assert payload["callbacks"] == {
         "finish": "https://amimumherbalproject.vercel.app/transaction/865740b2-8274-4b4c-b18e-bfed0aeaa176",
     }
+
+
+def test_generate_midtrans_payload_includes_shipping_address_and_product_details():
+    order = SimpleNamespace(
+        id="683e47dc-02be-4857-9301-540723b8d579",
+        total_price=27000,
+        customer_name="Maris",
+        customer_email="maris@example.com",
+        customer_phone="+628789216035",
+        user=SimpleNamespace(
+            firstname="Maris",
+            lastname="Iman",
+            fullname="Maris Iman",
+            address="Alamat akun utama",
+        ),
+        shipments=SimpleNamespace(
+            shipment_address=SimpleNamespace(
+                name="Maris Iman",
+                phone="+628789216035",
+                address="Jl. Tujuan No. 2",
+                city="Bandung",
+                zip_code="40111",
+            )
+        ),
+        order_items=[
+            SimpleNamespace(
+                id=1,
+                product_id="prod-phytofresh",
+                product_name="Phytofresh",
+                variant_product="Eceran",
+                quantity=2,
+                total_price=24000,
+                price_per_item=12000,
+            )
+        ],
+    )
+
+    payload = generate_midtrans_payload(order)
+
+    assert payload["customer_details"]["shipping_address"] == {
+        "first_name": "Maris Iman",
+        "phone": "+628789216035",
+        "address": "Jl. Tujuan No. 2",
+        "city": "Bandung",
+        "postal_code": "40111",
+        "country_code": "IDN",
+    }
+    assert payload["item_details"] == [
+        {
+            "id": "prod-phytofresh",
+            "price": 12000,
+            "quantity": 2,
+            "name": "Phytofresh - Eceran",
+        },
+        {
+            "id": "shipping_fee",
+            "price": 3000,
+            "quantity": 1,
+            "name": "Ongkir / biaya pengiriman",
+        },
+    ]
+    assert sum(item["price"] * item["quantity"] for item in payload["item_details"]) == payload["transaction_details"]["gross_amount"]
