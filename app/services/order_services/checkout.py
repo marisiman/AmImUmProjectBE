@@ -1,6 +1,6 @@
 import re
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, DataError, IntegrityError
 
@@ -53,6 +53,10 @@ def _extract_shipping_due_on_delivery(notes: str, shipping_cost: float) -> float
 def _fetch_variants_for_update(db: Session, variant_ids: list[int]):
     if not variant_ids:
         return [], True
+    if not hasattr(db, "bind"):
+        # Some lightweight service tests use narrow DB doubles that only model cart rows.
+        # Real SQLAlchemy sessions/proxies should support this lookup and get row locks.
+        return [], False
     try:
         rows = db.execute(
             select(PackTypeModel)
@@ -61,11 +65,7 @@ def _fetch_variants_for_update(db: Session, variant_ids: list[int]):
         ).scalars().all()
         return rows, True
     except Exception:
-        if hasattr(db, "bind"):
-            raise
-        # Some lightweight service tests use narrow DB doubles that only model cart rows.
-        # Real SQLAlchemy sessions/proxies should support this lookup and get row locks.
-        return [], False
+        raise
 
 
 def checkout(
@@ -168,6 +168,7 @@ def checkout(
         variant_rows, variant_lookup_supported = _fetch_variants_for_update(db, variant_ids)
         variant_map = {int(v.id): v for v in variant_rows}
 
+        purchased_pairs = set()
         for item in cart_items:
             variant = variant_map.get(int(item.variant_id)) if item.variant_id is not None else None
             if not variant and variant_lookup_supported:
@@ -213,10 +214,32 @@ def checkout(
                 total_price=line_total,
             )
             db.add(order_item)
+            purchased_pairs.add((item.product_id, item.variant_id))
 
             # Cart rows that have been converted into an order must be removed,
             # not merely deactivated, so purchased products disappear from cart.
             db.delete(item)
+
+        # Direct-buy historically could create/reuse duplicate cart rows for the
+        # same product+variant. Once a product+variant is converted into this
+        # order, remove any remaining duplicate cart rows for the same user so
+        # paid products do not stay visible in /cart.
+        if purchased_pairs:
+            duplicate_filters = [
+                and_(
+                    CartProductModel.product_id == product_id,
+                    CartProductModel.variant_id == variant_id,
+                )
+                for product_id, variant_id in purchased_pairs
+            ]
+            duplicate_cart_rows = db.execute(
+                select(CartProductModel).where(
+                    CartProductModel.customer_id == user_id,
+                    or_(*duplicate_filters),
+                )
+            ).scalars().all()
+            for duplicate_row in duplicate_cart_rows:
+                db.delete(duplicate_row)
 
         db.commit()
         db.refresh(order)

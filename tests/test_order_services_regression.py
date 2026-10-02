@@ -46,7 +46,7 @@ class DummyDB:
 
     def execute(self, stmt):
         if not self.execute_results:
-            raise AssertionError("Unexpected execute call")
+            return DummyExecuteResult([])
         return DummyExecuteResult(self.execute_results.pop(0))
 
     def query(self, model):
@@ -137,6 +137,32 @@ def test_checkout_creates_order_and_items(monkeypatch, checkout_module, fake_car
     assert len(db.added) == 2
     assert db.deleted == [fake_cart_item]
     assert fake_cart_item.is_active is True
+
+
+def test_checkout_deletes_duplicate_cart_rows_for_purchased_product_variant(monkeypatch, checkout_module, fake_cart_item):
+    shipment = SimpleNamespace(id=None, shipping_cost=0)
+    duplicate_cart_row = SimpleNamespace(
+        product_id="product-1",
+        variant_id=10,
+        quantity=1,
+        is_active=False,
+        product_price=5000,
+        total_price=5000,
+    )
+    db = DummyDB(execute_results=[[fake_cart_item], [duplicate_cart_row]], query_result=shipment)
+
+    monkeypatch.setattr(
+        checkout_module,
+        "get_cart_total",
+        lambda items: SimpleNamespace(total_all_active_prices=9000),
+    )
+    monkeypatch.setattr(checkout_module, "redis_client", None)
+
+    result = checkout_module.checkout(db, "user-1")
+
+    assert result.error is None
+    assert fake_cart_item in db.deleted
+    assert duplicate_cart_row in db.deleted
 
 
 def test_checkout_invalidates_cart_and_order_caches(monkeypatch, checkout_module, fake_cart_item):
