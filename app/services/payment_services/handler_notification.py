@@ -104,14 +104,19 @@ def handler_notification(notification_data: dict, db: Session) -> Result[dict, E
             }
         logger.debug(f"Data transaksi Midtrans: {midtrans_data}")
 
-        # Validasi dan ambil data pembayaran dari database
+        # Validasi dan ambil data pembayaran dari database.
+        # Jika signature sudah valid tetapi order/payment tidak ada di DB aplikasi,
+        # balas 200 agar Midtrans tidak terus retry/email untuk callback stale atau
+        # sandbox yang tidak terhubung ke database live. Signature invalid tetap 400.
         payment = get_payment_by_order_id(order_id, db)
         if not payment:
-            logger.warning(f"Pembayaran dengan order_id {order_id} tidak ditemukan.")
-            return build(error=HTTPException(
-                status_code=404,
-                detail="Pembayaran tidak ditemukan."
-            ))
+            logger.warning("Pembayaran dengan order_id %s tidak ditemukan. Callback diabaikan dengan 200.", order_id)
+            return ignored_notification_response(
+                order_id=order_id,
+                transaction_status=midtrans_data.get("transaction_status") or notification.transaction_status,
+                fraud_status=midtrans_data.get("fraud_status") or notification.fraud_status,
+                reason="payment_not_found",
+            )
 
         # Update data pembayaran di database
         update_payment_data(payment, midtrans_data or normalized_notification, db)
@@ -119,11 +124,13 @@ def handler_notification(notification_data: dict, db: Session) -> Result[dict, E
         # Validasi dan update status pesanan
         order = get_order_by_id(payment.order_id, db)
         if not order:
-            logger.warning(f"Pesanan terkait dengan order_id {order_id} tidak ditemukan.")
-            return build(error=HTTPException(
-                status_code=404,
-                detail="Pesanan tidak ditemukan."
-            ))
+            logger.warning("Pesanan terkait dengan order_id %s tidak ditemukan. Callback diabaikan dengan 200.", order_id)
+            return ignored_notification_response(
+                order_id=order_id,
+                transaction_status=midtrans_data.get("transaction_status") or notification.transaction_status,
+                fraud_status=midtrans_data.get("fraud_status") or notification.fraud_status,
+                reason="order_not_found",
+            )
 
         # Map status pembayaran ke status pesanan dengan guard transisi
         transaction_status = resolve_transaction_status(midtrans_data.get("transaction_status"))
@@ -186,6 +193,25 @@ def validate_signature_key(order_id: str, status_code: str, gross_amount: str, s
     key = f"{order_id}{status_code}{gross_amount}{server_key}"
     generated_key = hashlib.sha512(key.encode()).hexdigest()
     return generated_key == signature_key
+
+
+def ignored_notification_response(
+    order_id: str,
+    transaction_status: str | None,
+    fraud_status: str | None,
+    reason: str,
+) -> Result[dict, Exception]:
+    transaction_status_enum = resolve_transaction_status(transaction_status or TransactionStatusEnum.pending.value)
+    fraud_status_enum = resolve_fraud_status(fraud_status)
+    return build(data=PaymentNotificationResponseDto(
+        status_code=200,
+        message=f"Notifikasi Midtrans diterima tetapi diabaikan: {reason}",
+        data=PaymentNotificationSchemaDto(
+            order_id=order_id,
+            transaction_status=transaction_status_enum.value,
+            fraud_status=fraud_status_enum.value,
+        )
+    ))
 
 
 def invalidate_order_caches(customer_id: str | None, order_id: str) -> None:
