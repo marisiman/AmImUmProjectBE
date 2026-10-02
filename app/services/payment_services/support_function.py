@@ -126,6 +126,15 @@ def _build_item_details(order: OrderModel, gross_amount: int, order_items=None) 
     return item_details
 
 
+def _build_product_summary(item_details: list[dict]) -> str:
+    product_lines = [
+        f"{item.get('name', 'Produk')} x{item.get('quantity', 1)}"
+        for item in item_details
+        if item.get("id") not in {"shipping_fee", "order_discount"}
+    ]
+    return _clean_text("; ".join(product_lines), 255)
+
+
 def generate_midtrans_payload(order: OrderModel, order_items=None) -> dict:
     """
     Membuat payload untuk transaksi Midtrans.
@@ -165,6 +174,11 @@ def generate_midtrans_payload(order: OrderModel, order_items=None) -> dict:
     item_details = _build_item_details(order, gross_amount, order_items=order_items)
     if item_details:
         payload["item_details"] = item_details
+        product_summary = _build_product_summary(item_details)
+        if product_summary:
+            payload["custom_field1"] = product_summary
+            payload["custom_field2"] = f"Order {str(order.id)[:36]}"
+            payload["custom_field3"] = "Toko Herbal Amimum"
 
     return payload
 

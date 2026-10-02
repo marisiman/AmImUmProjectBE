@@ -118,6 +118,9 @@ def test_generate_midtrans_payload_includes_shipping_address_and_product_details
         },
     ]
     assert sum(item["price"] * item["quantity"] for item in payload["item_details"]) == payload["transaction_details"]["gross_amount"]
+    assert payload["custom_field1"] == "Phytofresh - Eceran x2"
+    assert payload["custom_field2"] == "Order 683e47dc-02be-4857-9301-540723b8d579"
+    assert payload["custom_field3"] == "Toko Herbal Amimum"
 
 
 def test_generate_midtrans_payload_uses_explicit_order_items_when_relation_is_empty():
@@ -158,3 +161,4 @@ def test_generate_midtrans_payload_uses_explicit_order_items_when_relation_is_em
             "name": "Produk dari Query - Botol",
         }
     ]
+    assert payload["custom_field1"] == "Produk dari Query - Botol x1"

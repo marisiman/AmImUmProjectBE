@@ -171,6 +171,10 @@ def create_transaction(
             )
 
         payment_reference = transaction_response.get("token")
+        stored_payment_response = {
+            **transaction_response,
+            "_amimum_request_payload": transaction_payload,
+        }
         existing_payment = db.execute(
             select(PaymentModel).where(PaymentModel.order_id == order.id)
         ).scalars().first()
@@ -179,7 +183,7 @@ def create_transaction(
             existing_payment.transaction_id = payment_reference
             existing_payment.gross_amount = payable_amount
             existing_payment.transaction_status = "pending"
-            existing_payment.payment_response = transaction_response
+            existing_payment.payment_response = stored_payment_response
             payment = existing_payment
         else:
             payment = PaymentModel(
@@ -187,7 +191,7 @@ def create_transaction(
                 transaction_id=payment_reference,
                 gross_amount=payable_amount,
                 transaction_status="pending",
-                payment_response=transaction_response,
+                payment_response=stored_payment_response,
             )
             db.add(payment)
 
