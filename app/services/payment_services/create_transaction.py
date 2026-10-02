@@ -9,7 +9,6 @@ from sqlalchemy.exc import SQLAlchemyError, DataError, IntegrityError
 from app.models.payment_model import PaymentModel
 from app.models.order_model import OrderModel
 from app.models.order_item_model import OrderItemModel
-from app.models.cart_product_model import CartProductModel
 from app.models.shipment_model import ShipmentModel
 
 from app.dtos.payment_dtos import PaymentOrderByIdDto, PaymentCreateDto, PaymentMidtransResponseDTO, PaymentInfoResponseDto
@@ -20,8 +19,6 @@ from app.services.cart_services.support_function import handle_db_error
 from app.libs.midtrans_config import snap
 from app.services.payment_services.support_function import generate_midtrans_payload, validate_midtrans_response
 from app.utils.result import build, Result
-
-from app.libs.redis_config import redis_client
 
 # Logger untuk Midtrans
 logger = logging.getLogger("midtrans")
@@ -195,24 +192,8 @@ def create_transaction(
             )
             db.add(payment)
 
-        # Menghapus item aktif dari keranjang setelah order dibuat, best-effort
-        db.query(CartProductModel).filter(
-            CartProductModel.customer_id == user_id,
-            CartProductModel.is_active == True
-        ).delete()
-
         db.commit()
         db.refresh(payment)
-
-        # Invalidasi cache dengan pendekatan best-effort
-        if redis_client:
-            try:
-                redis_keys = [f"cart:{user_id}:*", f"carts:{user_id}"]
-                for pattern in redis_keys:
-                    for key in redis_client.scan_iter(pattern):
-                        redis_client.delete(key)
-            except Exception as cache_error:
-                logger.warning("Failed to invalidate cart cache for user %s: %s", user_id, cache_error)
 
         # Buat DTO response
         payment_callback = PaymentMidtransResponseDTO(
