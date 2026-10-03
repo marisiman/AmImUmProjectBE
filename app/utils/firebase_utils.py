@@ -671,25 +671,36 @@ def build_order_status_email_body(
     customer_name: str | None,
     status_value: str,
     code_tracking: str | None = None,
+    delivery_type: str | None = None,
 ) -> str:
     """Build customer-safe order status email body.
 
     This helper intentionally avoids provider/payment tokens and internal shipment IDs.
-    Resi is shown only when admin has entered an actual courier tracking code.
+    Resi is shown only for delivery orders and only when admin has entered an actual courier tracking code.
+    Pickup orders never show courier tracking guidance because they are not shipped.
     """
     status_key = str(status_value or "").strip().lower()
     status_label = ORDER_STATUS_LABELS.get(status_key, "Status pesanan diperbarui")
     safe_name = _safe_text(customer_name, "Customer")
     safe_order_id = _safe_text(order_id, "-")
+    raw_delivery_type = getattr(delivery_type, "value", delivery_type)
+    normalized_delivery_type = str(raw_delivery_type or "delivery").strip().lower()
     tracking = str(code_tracking or "").strip()
     safe_tracking = _safe_text(tracking, "Belum tersedia") if tracking and tracking.lower() not in {"in process", "processing", "none", "null"} else "Belum tersedia"
     order_url = _customer_order_url(order_id)
 
-    tracking_note = (
-        f"<p><strong>No. Resi:</strong> {safe_tracking}</p>"
-        if safe_tracking != "Belum tersedia"
-        else "<p><strong>No. Resi:</strong> Belum tersedia. Resi akan muncul setelah admin memasukkan kode tracking resmi dari kurir.</p>"
-    )
+    if normalized_delivery_type == "pickup":
+        tracking_note = (
+            "<p><strong>Jenis Pesanan:</strong> Ambil langsung di toko</p>"
+            "<p>Pesanan ini tidak dikirim melalui kurir, sehingga tidak memakai nomor resi. "
+            "Silakan ikuti informasi status pengambilan di halaman transaksi.</p>"
+        )
+    else:
+        tracking_note = (
+            f"<p><strong>No. Resi:</strong> {safe_tracking}</p>"
+            if safe_tracking != "Belum tersedia"
+            else "<p><strong>No. Resi:</strong> Belum tersedia. Resi akan muncul setelah admin memasukkan kode tracking resmi dari kurir.</p>"
+        )
 
     return f"""
     <html>
@@ -726,6 +737,7 @@ def send_order_status_email(
     customer_name: str | None,
     status_value: str,
     code_tracking: str | None = None,
+    delivery_type: str | None = None,
 ) -> bool:
     """Send a non-critical customer order status email.
 
@@ -737,6 +749,6 @@ def send_order_status_email(
         return False
 
     subject_label = ORDER_STATUS_LABELS.get(str(status_value or "").strip().lower(), "Status pesanan diperbarui")
-    body = build_order_status_email_body(order_id, customer_name, status_value, code_tracking)
+    body = build_order_status_email_body(order_id, customer_name, status_value, code_tracking, delivery_type)
     send_email(str(to_email), f"Update Pesanan Amimum - {subject_label}", body, html=True)
     return True

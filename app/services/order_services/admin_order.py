@@ -237,6 +237,7 @@ def update_order_status_admin(
                     customer_name=getattr(order, "customer_name", None),
                     status_value=normalized_status,
                     code_tracking=tracking_for_email,
+                    delivery_type=getattr(order, "delivery_type", None),
                 )
             except Exception:
                 # Email delivery is best-effort and must not block a valid admin fulfillment update.

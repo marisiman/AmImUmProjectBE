@@ -96,6 +96,7 @@ def test_admin_update_status_can_store_tracking_code_clear_cache_and_notify_cust
         "customer_name": "Customer Test",
         "status_value": "shipped",
         "code_tracking": "JNE123456789",
+        "delivery_type": "delivery",
     }]
     assert redis.deleted == [
         "cache::orders:customer-1:*",

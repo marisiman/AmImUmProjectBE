@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from app.models.enums import DeliveryTypeEnum
 from app.utils import firebase_utils
 
 
@@ -126,3 +127,19 @@ def test_order_status_email_body_hides_placeholder_tracking():
     assert "Pesanan sedang diproses" in body
     assert "No. Resi:</strong> Belum tersedia" in body
     assert "in process" not in body
+
+
+def test_order_status_email_body_for_pickup_does_not_show_tracking_notice():
+    body = firebase_utils.build_order_status_email_body(
+        order_id="order-pickup-1",
+        customer_name="Maris",
+        status_value="completed",
+        code_tracking=None,
+        delivery_type=DeliveryTypeEnum.pickup,
+    )
+
+    assert "Pesanan selesai" in body
+    assert "Ambil langsung di toko" in body
+    assert "No. Resi" not in body
+    assert "Resi akan muncul" not in body
+    assert "tidak dikirim melalui kurir" in body
