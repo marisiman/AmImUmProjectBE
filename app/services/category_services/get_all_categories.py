@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from fastapi import HTTPException, status
 
@@ -9,6 +9,7 @@ import logging
 from app.models.tag_category_model import TagCategoryModel
 from app.dtos.category_dtos import AllCategoryResponseDto, AllCategoryInfoResponseDto
 from app.dtos.error_response_dtos import ErrorResponseDto
+from app.services.article_services.update_article import delete_cache_by_pattern
 
 from app.utils.result import build, Result
 from app.libs.redis_config import custom_json_serializer, redis_client
@@ -17,6 +18,33 @@ logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600  # Cache TTL dalam detik (1 jam)
 RESPONSE_MESSAGE = "All List of tag Categories accessed successfully"
+CREATIVE_CRAFT_CATEGORY_NAME = "Aksesoris & Custom Craft"
+CREATIVE_CRAFT_CATEGORY_DESCRIPTION = (
+    "Kategori untuk produk kreatif dan custom seperti sticker, cutting/grafir akrilik, "
+    "craft souvenir, dan 3D print."
+)
+
+
+def ensure_creative_craft_category(db: Session) -> bool:
+    """Seed the Amimum Creative category once so admin/product forms can use a real DB ID."""
+    existing = db.execute(
+        select(TagCategoryModel.id).where(
+            func.lower(func.trim(TagCategoryModel.name))
+            == CREATIVE_CRAFT_CATEGORY_NAME.lower()
+        )
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        return False
+
+    db.add(TagCategoryModel(
+        name=CREATIVE_CRAFT_CATEGORY_NAME,
+        description=CREATIVE_CRAFT_CATEGORY_DESCRIPTION,
+    ))
+    db.commit()
+    delete_cache_by_pattern("categories:*")
+    return True
+
 
 def get_all_categories(
         db: Session,
@@ -26,6 +54,8 @@ def get_all_categories(
     cache_key = f"categories:{skip}:{limit}"
 
     try:
+        ensure_creative_craft_category(db)
+
         # Check if product data exists in Redis
         cached_categorie = None
         if redis_client:
