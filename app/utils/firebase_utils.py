@@ -40,6 +40,29 @@ ORDER_STATUS_LABELS = {
     "failed": "Pesanan gagal",
     "refund": "Dana dikembalikan",
 }
+PICKUP_ORDER_STATUS_LABELS = {
+    "pending": "Menunggu pembayaran",
+    "paid": "Pembayaran berhasil",
+    "capture": "Pembayaran berhasil",
+    "settlement": "Pembayaran berhasil",
+    "processing": "Pesanan siap diambil",
+    "shipped": "Pesanan siap diambil",
+    "completed": "Pesanan sudah diambil",
+    "cancelled": "Pesanan dibatalkan",
+    "failed": "Pesanan gagal",
+    "refund": "Dana dikembalikan",
+}
+
+
+def _normalize_delivery_type(delivery_type: object) -> str:
+    raw_delivery_type = getattr(delivery_type, "value", delivery_type)
+    return str(raw_delivery_type or "delivery").strip().lower()
+
+
+def _order_status_label(status_value: object, delivery_type: object = None) -> str:
+    status_key = str(status_value or "").strip().lower()
+    label_map = PICKUP_ORDER_STATUS_LABELS if _normalize_delivery_type(delivery_type) == "pickup" else ORDER_STATUS_LABELS
+    return label_map.get(status_key, "Status pesanan diperbarui")
 
 
 def _safe_text(value: object, fallback: str = "") -> str:
@@ -680,11 +703,10 @@ def build_order_status_email_body(
     Pickup orders never show courier tracking guidance because they are not shipped.
     """
     status_key = str(status_value or "").strip().lower()
-    status_label = ORDER_STATUS_LABELS.get(status_key, "Status pesanan diperbarui")
+    status_label = _order_status_label(status_key, delivery_type)
     safe_name = _safe_text(customer_name, "Customer")
     safe_order_id = _safe_text(order_id, "-")
-    raw_delivery_type = getattr(delivery_type, "value", delivery_type)
-    normalized_delivery_type = str(raw_delivery_type or "delivery").strip().lower()
+    normalized_delivery_type = _normalize_delivery_type(delivery_type)
     tracking = str(code_tracking or "").strip()
     safe_tracking = _safe_text(tracking, "Belum tersedia") if tracking and tracking.lower() not in {"in process", "processing", "none", "null"} else "Belum tersedia"
     order_url = _customer_order_url(order_id)
@@ -748,7 +770,7 @@ def send_order_status_email(
         logger.info("Skip order status email for order %s because customer email is empty.", order_id)
         return False
 
-    subject_label = ORDER_STATUS_LABELS.get(str(status_value or "").strip().lower(), "Status pesanan diperbarui")
+    subject_label = _order_status_label(status_value, delivery_type)
     body = build_order_status_email_body(order_id, customer_name, status_value, code_tracking, delivery_type)
     send_email(str(to_email), f"Update Pesanan Amimum - {subject_label}", body, html=True)
     return True

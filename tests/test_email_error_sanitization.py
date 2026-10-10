@@ -138,8 +138,23 @@ def test_order_status_email_body_for_pickup_does_not_show_tracking_notice():
         delivery_type=DeliveryTypeEnum.pickup,
     )
 
-    assert "Pesanan selesai" in body
+    assert "Pesanan sudah diambil" in body
     assert "Ambil langsung di toko" in body
     assert "No. Resi" not in body
     assert "Resi akan muncul" not in body
     assert "tidak dikirim melalui kurir" in body
+
+
+def test_order_status_email_body_for_pickup_processing_says_ready_to_pickup():
+    body = firebase_utils.build_order_status_email_body(
+        order_id="order-pickup-ready",
+        customer_name="Maris",
+        status_value="processing",
+        code_tracking=None,
+        delivery_type=DeliveryTypeEnum.pickup,
+    )
+
+    assert "Pesanan siap diambil" in body
+    assert "Pesanan sedang diproses" not in body
+    assert "Ambil langsung di toko" in body
+    assert "No. Resi" not in body
