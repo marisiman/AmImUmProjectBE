@@ -47,6 +47,11 @@ class FakeDB:
         return FakeExecuteResult(self.address)
 
 
+class RollbackOnlyDB:
+    def rollback(self):
+        pass
+
+
 def test_invalidate_user_address_cache_deletes_owner_address_exact_key(monkeypatch):
     fake_redis = FakeRedis()
     monkeypatch.setattr(cache_utils, "redis_client", fake_redis)
@@ -64,28 +69,46 @@ def test_owner_accessible_address_uses_database_not_stale_cache(monkeypatch):
             raise AssertionError("owner-address should not read Redis cache")
 
     monkeypatch.setattr(accessible_address_module, "redis_client", StaleRedis(), raising=False)
-    db = FakeDB(
-        SimpleNamespace(
-            id=1,
-            name="Alamat Toko Baru",
-            phone="+6281234567890",
-            address="Alamat baru dari database",
-            city="DEMAK",
-            city_id=106,
-            state="JAWA TENGAH",
-            country="Indonesia",
-            zip_code=59517,
-            created_at=datetime(2026, 1, 1),
-        )
+    stale_address_row = SimpleNamespace(
+        id=1,
+        name="Bu Rus",
+        phone="+6285296708577",
+        address="Juwana, Pati",
+        city="DEMAK",
+        city_id=106,
+        state="JAWA TENGAH",
+        country="Indonesia",
+        zip_code=59517,
+        created_at=datetime(2026, 1, 1),
+    )
+    owner_identity = SimpleNamespace(
+        fullname="Toko Herbal Amimum",
+        firstname=None,
+        lastname=None,
+        phone="+6285296708577",
+        address="Ds. Bakaran Kulon RT02/Rw01, Bakaran",
+    )
+    monkeypatch.setattr(
+        accessible_address_module,
+        "get_shipment_address",
+        lambda db, user_id: stale_address_row,
+    )
+    monkeypatch.setattr(
+        accessible_address_module,
+        "get_user",
+        lambda db, user_id: owner_identity,
     )
 
     result = accessible_address_module.accessible_address(
-        db=db,
+        db=RollbackOnlyDB(),
         user_id="customer-1",
         target_user_id=accessible_address_module.OWNER_SHOP_ID,
     )
 
     assert result.error is None
     response = result.unwrap()
-    assert response.data.name == "Alamat Toko Baru"
-    assert response.data.address == "Alamat baru dari database"
+    assert response.data.name == "Toko Herbal Amimum"
+    assert response.data.phone == "+6285296708577"
+    assert response.data.address == "Ds. Bakaran Kulon RT02/Rw01, Bakaran"
+    assert response.data.city == "DEMAK"
+    assert response.data.city_id == 106
