@@ -9,7 +9,7 @@ logger = logging.getLogger("midtrans")
 
 CUSTOMER_APP_URL = os.getenv(
     "CUSTOMER_APP_URL",
-    "https://tokoherbalamimum.web.id",
+    "https://www.tokoherbalamimum.web.id",
 ).rstrip("/")
 
 

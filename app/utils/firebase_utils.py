@@ -25,7 +25,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 SHOP_NAME = "Toko Herbal AmImUm"
-CUSTOMER_FRONTEND_URL = os.getenv("CUSTOMER_FRONTEND_URL", "https://tokoherbalamimum.web.id").rstrip("/")
+CUSTOMER_FRONTEND_URL = os.getenv("CUSTOMER_FRONTEND_URL", "https://www.tokoherbalamimum.web.id").rstrip("/")
 SHOPEE_MARKETPLACE_URL = os.getenv("SHOPEE_MARKETPLACE_URL", "https://shopee.co.id/tokoherbalamimum")
 TOKOPEDIA_MARKETPLACE_URL = os.getenv("TOKOPEDIA_MARKETPLACE_URL", "https://www.tokopedia.com/herbalamimum")
 ORDER_STATUS_LABELS = {
@@ -501,7 +501,7 @@ def send_verification_email(firebase_user, firstname, verification_code):
         # agar email dan kode bisa otomatis terisi di form verifikasi.
         verify_base_url = os.getenv(
             "CUSTOMER_VERIFY_ACCOUNT_URL",
-            "https://tokoherbalamimum.web.id/verify-account",
+            "https://www.tokoherbalamimum.web.id/verify-account",
         ).rstrip("/")
         verification_link = f"{verify_base_url}?{urlencode({'code': verification_code, 'email': email})}"
 
