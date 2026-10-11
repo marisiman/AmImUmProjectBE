@@ -60,13 +60,14 @@ class TypeIdToUpdateDto(BaseModel):
 
 
 class PackTypeEditInfoDto(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=50)
     stock: Optional[int] = Field(default=None, ge=0)
     price: Optional[float] = Field(default=None, ge=0)
     discount: Optional[float] = Field(default=None, ge=0, le=100)
     variant: Optional[str] = Field(default=None, max_length=25)
     expiration: Optional[str] = Field(default=None, max_length=15)
 
-    @field_validator("variant", "expiration")
+    @field_validator("name", "variant", "expiration")
     @classmethod
     def normalize_update_text(cls, value: Optional[str]) -> Optional[str]:
         if value is None:

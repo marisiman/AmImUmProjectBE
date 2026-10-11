@@ -145,7 +145,7 @@ def test_update_stock_only_updates_provided_fields(update_stock_module):
         id=2,
         product_id="prod-1",
         product="Teh Herbal",
-        name="Sachet",
+        name="Sachet Lama",
         img=None,
         variant="Jeruk",
         expiration=None,
@@ -157,15 +157,17 @@ def test_update_stock_only_updates_provided_fields(update_stock_module):
         updated_at=NOW,
     )
     db = DummyDB(variant=variant)
-    payload = SimpleNamespace(model_dump=lambda exclude_none=False: {
-        "stock": 5,
-        "price": 12000.0,
-    })
+    payload = PackTypeEditInfoDto(
+        name="Sachet Baru",
+        stock=5,
+        price=12000.0,
+    )
     type_id_update = SimpleNamespace(type_id=2)
 
     result = update_stock_module.update_stock(db, type_id_update, payload)
 
     assert result.error is None
+    assert variant.name == "Sachet Baru"
     assert variant.stock == 5
     assert variant.price == 12000.0
     assert variant.discount == 10.0
