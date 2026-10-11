@@ -17,7 +17,7 @@ router = APIRouter(
 
 CUSTOMER_RESET_PASSWORD_URL = os.getenv(
     "CUSTOMER_RESET_PASSWORD_URL",
-    "https://amimumherbalproject.vercel.app/reset-password",
+    "https://tokoherbalamimum.web.id/reset-password",
 ).rstrip("/")
 
 ## == USER - REGISTER == ##

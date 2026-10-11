@@ -25,7 +25,7 @@ def test_customer_forgot_password_uses_customer_frontend_reset_url(monkeypatch):
     payload = user_dtos.ForgotPasswordDto(email="customer@gmail.com")
     user_router.forgot_password(payload=payload, db=object())
 
-    assert calls == ["https://amimumherbalproject.vercel.app/reset-password"]
+    assert calls == ["https://tokoherbalamimum.web.id/reset-password"]
 
 
 def test_admin_forgot_password_keeps_internal_dashboard_reset_url(monkeypatch):
