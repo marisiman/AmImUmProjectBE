@@ -197,15 +197,11 @@ async def upload_product_image(db: Session, product_id: str, file: UploadFile) -
     width = uploaded_width or width
     height = uploaded_height or height
 
-    # Replace mode: saat upload dari halaman edit, hapus gambar lama dulu.
+    # Replace mode: upload foto produk dari halaman edit harus mengganti foto lama,
+    # bukan menambah file terus-menerus. Simpan URL lama dulu, hapus row lama +
+    # insert row baru dalam transaksi DB, lalu bersihkan file storage lama best-effort.
     existing_images = db.query(ProductImageModel).filter(ProductImageModel.product_id == product_id).all()
-    for old_img in existing_images:
-        if old_img.url:
-            delete_media_url(old_img.url)
-
-    if existing_images:
-        db.execute(delete(ProductImageModel).where(ProductImageModel.product_id == product_id))
-        db.commit()
+    old_media_urls = [old_img.url for old_img in existing_images if old_img.url]
 
     image_model = ProductImageModel(
         product_id=product_id,
@@ -220,10 +216,16 @@ async def upload_product_image(db: Session, product_id: str, file: UploadFile) -
         sort_order=0,
     )
 
+    if existing_images:
+        db.execute(delete(ProductImageModel).where(ProductImageModel.product_id == product_id))
+
     db.add(image_model)
     db.commit()
     db.refresh(image_model)
     invalidate_product_cache(product_id)
+
+    for old_url in old_media_urls:
+        delete_media_url(old_url)
 
     elapsed_ms = int((time.time() - started_at) * 1000)
     logger.info(

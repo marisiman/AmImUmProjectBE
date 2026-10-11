@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models.product_image_model import ProductImageModel
 from app.utils.result import build, Result
 from app.services.product_services.cache_utils import invalidate_product_cache
+from app.libs.storage_media_utils import delete_media_url
 
 
 def set_primary_product_image(db: Session, product_id: str, image_id: int) -> Result[dict, Exception]:
@@ -33,11 +34,13 @@ def delete_product_image(db: Session, product_id: str, image_id: int) -> Result[
 
     was_primary = image.is_primary
     file_path = image.file_path
+    image_url = image.url
     db.delete(image)
     db.commit()
 
     if file_path and os.path.exists(file_path):
         os.remove(file_path)
+    delete_media_url(image_url)
 
     if was_primary:
         next_image = db.query(ProductImageModel).filter(ProductImageModel.product_id == product_id).order_by(ProductImageModel.sort_order.asc()).first()
