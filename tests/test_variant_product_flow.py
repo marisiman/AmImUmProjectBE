@@ -3,6 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
+
+from app.dtos.pack_type_dtos import PackTypeCreateDto, PackTypeEditInfoDto
 
 
 NOW = datetime(2026, 4, 21, 11, 30, 0)
@@ -119,6 +122,22 @@ def test_create_type_returns_variant_price(create_type_module):
     assert result.error is None
     assert result.data.data.price == 15000.0
     assert result.data.data.discounted_price == 13500.0
+
+
+def test_pack_type_dto_rejects_expiration_longer_than_db_column():
+    with pytest.raises(ValidationError):
+        PackTypeCreateDto(
+            product_id="prod-1",
+            name="Tanpa Lampu",
+            min_amount=1,
+            variant="Type_01",
+            expiration="tanpa kadaluarsa",
+            stock=2,
+            price=7500.0,
+        )
+
+    with pytest.raises(ValidationError):
+        PackTypeEditInfoDto(expiration="tanpa kadaluarsa")
 
 
 def test_update_stock_only_updates_provided_fields(update_stock_module):

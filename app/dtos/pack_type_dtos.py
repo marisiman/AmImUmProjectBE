@@ -6,10 +6,10 @@ from pydantic import BaseModel, Field, field_validator
 
 class PackTypeCreateDto(BaseModel):
     product_id: str
-    name: str
+    name: str = Field(..., max_length=50)
     min_amount: int = Field(..., ge=1)
-    variant: Optional[str] = None
-    expiration: Optional[str] = None
+    variant: Optional[str] = Field(default=None, max_length=25)
+    expiration: Optional[str] = Field(default=None, max_length=15)
     stock: int = Field(..., ge=0)
     price: float = Field(..., ge=0)
     discount: Optional[float] = Field(default=None, ge=0, le=100)
@@ -63,8 +63,8 @@ class PackTypeEditInfoDto(BaseModel):
     stock: Optional[int] = Field(default=None, ge=0)
     price: Optional[float] = Field(default=None, ge=0)
     discount: Optional[float] = Field(default=None, ge=0, le=100)
-    variant: Optional[str] = None
-    expiration: Optional[str] = None
+    variant: Optional[str] = Field(default=None, max_length=25)
+    expiration: Optional[str] = Field(default=None, max_length=15)
 
     @field_validator("variant", "expiration")
     @classmethod
