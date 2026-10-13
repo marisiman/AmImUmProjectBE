@@ -10,7 +10,7 @@ from app.dtos.error_response_dtos import ErrorResponseDto
 from app.services.product_services.support_function import handle_db_error
 
 from app.utils.result import build, Result
-from app.libs.redis_config import redis_client
+from app.services.product_services.cache_utils import invalidate_product_cache
 
 def create_product(
         db: Session,
@@ -41,16 +41,10 @@ def create_product(
             updated_at=product_instance.updated_at
         )
 
-        # Invalidasi cache dengan pendekatan yang lebih efisien
-        redis_keys = [
-            f"products:*",
-            f"product:*",
-            f"discounts:*",
-            f"promotions:*"
-        ]
-        for pattern in redis_keys:
-            for key in redis_client.scan_iter(pattern):
-                redis_client.delete(key)
+        # Cache invalidation must be best-effort. Product creation has already
+        # committed to the database; Redis/storage/cache issues must not turn a
+        # successful create into a 500/network error in the dashboard.
+        invalidate_product_cache(str(product_instance.id))
 
         return build(data=ProductResponseDto(
             status_code=201,
