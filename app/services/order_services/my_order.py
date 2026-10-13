@@ -23,6 +23,7 @@ from app.libs.redis_config import redis_client, custom_json_serializer
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600
+CACHE_VERSION = "v2-images"
 RESPONSE_MESSAGE = "All orders accessed successfully"
 
 def my_order(
@@ -33,7 +34,7 @@ def my_order(
     ) -> Result[order_dtos.GetOrderInfoResponseDto, Exception]:
     try:
         # Redis key for caching
-        redis_key = f"orders:{user_id}:{skip}:{limit}"
+        redis_key = f"orders:{CACHE_VERSION}:{user_id}:{skip}:{limit}"
 
         # Check if wishlist data exists in Redis
         cached_order = None

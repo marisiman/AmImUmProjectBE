@@ -23,6 +23,7 @@ from app.libs.redis_config import custom_json_serializer, redis_client
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600
+CACHE_VERSION = "v2-images"
 RESPONSE_MESSAGE = "Order details accessed successfully"
 
 def detail_order(
@@ -32,7 +33,7 @@ def detail_order(
     ) -> Result[order_dtos.GetOrderDetailResponseDto, Exception]:
     try:
         # Redis key for caching
-        redis_key = f"order:{user_id}:{order_id}"
+        redis_key = f"order:{CACHE_VERSION}:{user_id}:{order_id}"
 
         # Check if product data exists in Redis
         cached_order = None

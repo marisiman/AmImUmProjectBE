@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional
+import os
 
 from sqlalchemy import Column, Integer, DECIMAL, DateTime, ForeignKey, func
 from sqlalchemy.dialects.mysql import CHAR
@@ -60,6 +61,52 @@ class OrderItemModel(Base):
     @property
     def variant_discount(self):
         return self.pack_type.discount if self.pack_type else 0
+
+    @staticmethod
+    def _normalize_image_url(url: str | None) -> str | None:
+        if not url:
+            return None
+        if "127.0.0.1" not in url and "localhost" not in url:
+            return url
+
+        host_url = os.getenv("HOST_URL", "").rstrip("/")
+        if not host_url:
+            railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+            if railway_domain:
+                host_url = f"https://{railway_domain.strip('/')}"
+        if not host_url:
+            return url
+
+        try:
+            path = url.split("/images/", 1)[1]
+            return f"{host_url}/images/{path}"
+        except Exception:
+            return url
+
+    @property
+    def variant_image(self) -> Optional[str]:
+        return self._normalize_image_url(self.pack_type.img if self.pack_type else None)
+
+    @property
+    def product_image(self) -> Optional[str]:
+        product = self.products
+        product_images = getattr(product, "product_images", None) if product else None
+        if not product_images:
+            return None
+
+        sorted_images = sorted(
+            product_images,
+            key=lambda image: (
+                0 if getattr(image, "is_primary", False) else 1,
+                getattr(image, "sort_order", 0) or 0,
+                getattr(image, "id", 0) or 0,
+            ),
+        )
+        return self._normalize_image_url(sorted_images[0].url if sorted_images else None)
+
+    @property
+    def image(self) -> Optional[str]:
+        return self.variant_image or self.product_image
 
     @property
     def promo(self):

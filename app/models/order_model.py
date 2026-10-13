@@ -111,12 +111,18 @@ class OrderModel(Base):
         return [
             order_dtos.OrderItemDto(
                 id=order_item.id,
+                product_id=order_item.product_id,
+                variant_id=order_item.variant_id,
                 product_name=order_item.product_name,
                 variant_product=order_item.variant_product,
                 variant_discount=order_item.variant_discount,
                 quantity=order_item.quantity,
                 price_per_item=order_item.price_per_item,
                 total_price=order_item.total_price,
+                image=order_item.image,
+                img=order_item.image,
+                product_image=order_item.product_image,
+                variant_image=order_item.variant_image,
                 created_at=order_item.created_at
             ).model_dump() for order_item in self.order_items
         ] if self.order_items else []
