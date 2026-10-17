@@ -20,7 +20,6 @@ load_dotenv()
 ##################################################################################
 """
 from app.models.user_model import UserModel
-from app.models.article_model import ArticleModel
 from app.models.stock_movement_model import StockMovementModel
 from app.models.inventory_threshold_model import InventoryThresholdModel
 """

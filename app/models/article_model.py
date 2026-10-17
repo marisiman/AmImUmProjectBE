@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, Text, func, true
+from sqlalchemy import Column, Integer, String, DateTime, Text, func
 from sqlalchemy.orm import Session
 from app.libs import sql_alchemy_lib
 
@@ -13,7 +13,6 @@ class ArticleModel(sql_alchemy_lib.Base):
     
     # Atribut untuk menampilkan ID yang berurutan
     display_id = Column(Integer, nullable=True, index=True)
-    is_published = Column(Boolean, nullable=False, default=True, server_default=true())
 
     def __repr__(self):
         return f"<Article(title='{self.title}', id={self.id})>"
