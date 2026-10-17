@@ -48,6 +48,22 @@ class AllArticleResponseDto(BaseModel):
     message: str = Field(default="All list info of articles success to access")
     data: List[GetAllArticleDTO]
 
+class AdminArticleDTO(GetAllArticleDTO):
+    is_published: bool = True
+
+class AdminArticlesResponseDTO(BaseModel):
+    status_code: int = Field(default=200)
+    message: str = Field(default="Daftar artikel admin berhasil diambil")
+    data: List[AdminArticleDTO]
+
+class ArticlePublicationUpdateDTO(BaseModel):
+    is_published: bool
+
+class ArticlePublicationResponseDTO(BaseModel):
+    status_code: int = Field(default=200)
+    message: str = Field(default="Status publikasi artikel berhasil diperbarui")
+    data: AdminArticleDTO
+
 class DeleteArticleDto(BaseModel):
     article_id:int
 

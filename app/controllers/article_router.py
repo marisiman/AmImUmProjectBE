@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 from typing import List, Annotated
-from app.dtos.article_dtos import ArticleCreateDTO, ArticleIdToUpdateDto, ArticleDataUpdateDTO, ArticleInfoUpdateResponseDto, ArticleResponseDTO, ArticleCreateResponseDto, GetAllArticleDTO, AllArticleResponseDto, DeleteArticleDto, DeleteArticleResponseDto
+from app.dtos.article_dtos import ArticleCreateDTO, ArticleIdToUpdateDto, ArticleDataUpdateDTO, ArticleInfoUpdateResponseDto, ArticleResponseDTO, ArticleCreateResponseDto, GetAllArticleDTO, AllArticleResponseDto, DeleteArticleDto, DeleteArticleResponseDto, AdminArticlesResponseDTO, ArticlePublicationUpdateDTO, ArticlePublicationResponseDTO
 from app.services import article_services
 from app.libs.sql_alchemy_lib import get_db
 from app.libs.jwt_lib import jwt_dto, jwt_service
@@ -170,6 +170,56 @@ def read_articles(
         raise result.error
     
     return result.unwrap()
+
+
+@router.get(
+    "/published",
+    response_model=AllArticleResponseDto,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve published articles for the storefront",
+)
+def read_published_articles(db: Session = Depends(get_db)):
+    result = article_services.get_published_articles(db)
+    if result.error:
+        raise result.error
+    return result.unwrap()
+
+
+@router.get(
+    "/admin/all",
+    response_model=AdminArticlesResponseDTO,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(jwt_service.admin_access_required)],
+    summary="Retrieve published and archived articles for admins",
+)
+def read_admin_articles(db: Session = Depends(get_db)):
+    result = article_services.get_admin_articles(db)
+    if result.error:
+        raise result.error
+    return result.unwrap()
+
+
+@router.patch(
+    "/{article_id}/publication",
+    response_model=ArticlePublicationResponseDTO,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(jwt_service.admin_access_required)],
+    summary="Publish or archive an article without deleting it",
+)
+def update_article_publication(
+    article_id: int,
+    publication: ArticlePublicationUpdateDTO,
+    db: Session = Depends(get_db),
+):
+    result = article_services.update_article_publication(
+        db=db,
+        article_id=article_id,
+        is_published=publication.is_published,
+    )
+    if result.error:
+        raise result.error
+    return result.unwrap()
+
 
 @router.put(
         "/update/{article_id}", 

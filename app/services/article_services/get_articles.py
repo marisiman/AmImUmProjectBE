@@ -119,3 +119,144 @@ def get_articles(
                 message="Permintaan belum bisa diproses. Silakan coba beberapa saat lagi."
             ).dict()
         ))
+
+
+def _article_admin_dto(article: ArticleModel) -> article_dtos.AdminArticleDTO:
+    return article_dtos.AdminArticleDTO(
+        id=article.id,
+        display_id=article.display_id,
+        title=article.title,
+        img=article.img,
+        description_list=article.description_list,
+        is_published=article.is_published,
+    )
+
+
+def get_published_articles(db: Session) -> Result[article_dtos.AllArticleResponseDto, Exception]:
+    """Return only published articles for the customer storefront."""
+    try:
+        articles = db.execute(
+            select(ArticleModel)
+            .where(ArticleModel.is_published.is_(True))
+            .order_by(ArticleModel.display_id)
+        ).scalars().all()
+        data = [
+            article_dtos.GetAllArticleDTO(
+                id=article.id,
+                display_id=article.display_id,
+                title=article.title,
+                img=article.img,
+                description_list=article.description_list,
+            )
+            for article in articles
+        ]
+        return build(data=article_dtos.AllArticleResponseDto(
+            status_code=status.HTTP_200_OK,
+            message=RESPONSE_MESSAGE,
+            data=data,
+        ))
+    except SQLAlchemyError:
+        db.rollback()
+        return build(error=HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_409_CONFLICT,
+                error="Conflict",
+                message="Data belum bisa diambil karena konflik. Silakan coba lagi.",
+            ).dict(),
+        ))
+    except Exception:
+        return build(error=HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                error="Internal Server Error",
+                message="Artikel belum bisa dimuat. Silakan coba lagi beberapa saat lagi.",
+            ).dict(),
+        ))
+
+
+def get_admin_articles(db: Session) -> Result[article_dtos.AdminArticlesResponseDTO, Exception]:
+    """Return published and archived articles for authorized content management."""
+    try:
+        articles = db.execute(
+            select(ArticleModel).order_by(ArticleModel.display_id)
+        ).scalars().all()
+        return build(data=article_dtos.AdminArticlesResponseDTO(
+            status_code=status.HTTP_200_OK,
+            message="Daftar artikel admin berhasil diambil",
+            data=[_article_admin_dto(article) for article in articles],
+        ))
+    except SQLAlchemyError:
+        db.rollback()
+        return build(error=HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_409_CONFLICT,
+                error="Conflict",
+                message="Data belum bisa diambil karena konflik. Silakan coba lagi.",
+            ).dict(),
+        ))
+    except Exception:
+        return build(error=HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                error="Internal Server Error",
+                message="Artikel belum bisa dimuat. Silakan coba lagi beberapa saat lagi.",
+            ).dict(),
+        ))
+
+
+def update_article_publication(
+    db: Session,
+    article_id: int,
+    is_published: bool,
+) -> Result[article_dtos.ArticlePublicationResponseDTO, Exception]:
+    """Reversibly publish or archive an article without deleting its record."""
+    try:
+        article = db.execute(
+            select(ArticleModel).where(ArticleModel.id == article_id)
+        ).scalars().first()
+        if not article:
+            return build(error=HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ErrorResponseDto(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    error="Not Found",
+                    message="Artikel tidak ditemukan.",
+                ).dict(),
+            ))
+
+        article.is_published = is_published
+        db.commit()
+        db.refresh(article)
+
+        from app.services.article_services.update_article import delete_cache_by_pattern
+        delete_cache_by_pattern("articles:*")
+
+        return build(data=article_dtos.ArticlePublicationResponseDTO(
+            status_code=status.HTTP_200_OK,
+            message="Artikel berhasil dipublikasikan." if is_published else "Artikel berhasil diarsipkan.",
+            data=_article_admin_dto(article),
+        ))
+    except SQLAlchemyError:
+        db.rollback()
+        return build(error=HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_409_CONFLICT,
+                error="Conflict",
+                message="Status artikel belum bisa diperbarui. Silakan coba lagi.",
+            ).dict(),
+        ))
+    except Exception:
+        db.rollback()
+        return build(error=HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ErrorResponseDto(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                error="Internal Server Error",
+                message="Status artikel belum bisa diperbarui. Silakan coba lagi.",
+            ).dict(),
+        ))
