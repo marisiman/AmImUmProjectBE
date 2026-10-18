@@ -1,3 +1,5 @@
+import os
+
 from fastapi import HTTPException, status
 
 from sqlalchemy import select
@@ -7,10 +9,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Type
 
 from app.models.product_model import ProductModel
+from app.models.product_image_model import ProductImageModel
 from app.dtos.product_dtos import AllProductInfoDTO, AllProductInfoResponseDto
 from app.dtos.error_response_dtos import ErrorResponseDto
 
-from app.services.product_services.support_function import handle_db_error
+from app.services.product_services.support_function import handle_db_error, normalize_product_image_url
 
 from app.utils.result import build, Result
 
@@ -27,7 +30,10 @@ def search_product(
         product_model = (
             db.execute(
                 select(ProductModel)
-                .options(selectinload(ProductModel.pack_type))  # Eager loading untuk pack_type
+                .options(
+                    selectinload(ProductModel.pack_type),
+                    selectinload(ProductModel.product_images),
+                )
                 .filter(
                     ProductModel.name.ilike(search_query)
                 )
@@ -58,6 +64,24 @@ def search_product(
                 min_variant_price=product.min_variant_price,
                 max_variant_price=product.max_variant_price,
                 brand_info=product.brand_info,
+                primary_image_url=(
+                    normalize_product_image_url(
+                        next((image.url for image in product.product_images if image.is_primary), None)
+                    )
+                    or os.getenv("DEFAULT_PRODUCT_IMAGE_URL")
+                ),
+                gallery_images=[
+                    {
+                        "id": image.id,
+                        "url": normalize_product_image_url(image.url),
+                        "is_primary": image.is_primary,
+                        "sort_order": image.sort_order,
+                    }
+                    for image in sorted(
+                        product.product_images or [],
+                        key=lambda image: (image.sort_order or 0, image.id or 0),
+                    )
+                ],
                 all_variants=product.all_variants or [],
                 created_at=product.created_at
             )
