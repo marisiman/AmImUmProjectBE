@@ -9,11 +9,11 @@ class RatingCreateOfIdProductDto(BaseModel):
 
 class RatingCreateDto(BaseModel):
     rate: Optional[int] = Field(
-        ge=1, 
-        le=5, 
+        ge=1,
+        le=5,
         description="Rating harus bernilai antara 1 dan 5."
     )
-    review: Optional[str] = None
+    review: Optional[str] = Field(default=None, max_length=100)
 
 class RatingInfoCreateDto(BaseModel):
     id: int
@@ -61,8 +61,8 @@ class ReviewIdToUpdateDto(BaseModel):
     rating_id:int
 
 class ReviewDataUpdateDTO(BaseModel):
-    rate: int
-    review: Optional[str] = None
+    rate: int = Field(ge=1, le=5)
+    review: Optional[str] = Field(default=None, max_length=100)
 
 class ReviewInfoUpdateResponseDto(BaseModel):
     status_code: int = Field(default=200)
@@ -82,3 +82,28 @@ class DeleteReviewResponseDto(BaseModel):
     status_code: int = Field(default=200)
     message: str = Field(default="Your article has been deleted")
     data: InfoDeleteReviewDto
+
+
+class ProductRatingReviewDto(BaseModel):
+    id: int
+    rate: int
+    review: Optional[str] = None
+    rater_name: str = "Pembeli"
+    created_at: datetime
+    verified_purchase: bool = True
+
+
+class ProductRatingSummaryDto(BaseModel):
+    avg_rating: float = 0
+    total_rater: int = 0
+    rating_distribution: dict[int, int] = Field(default_factory=dict)
+
+
+class ProductRatingsResponseDto(BaseModel):
+    status_code: int = Field(default=200)
+    message: str = Field(default="Rating pembeli terverifikasi berhasil dimuat.")
+    summary: ProductRatingSummaryDto
+    data: List[ProductRatingReviewDto]
+    skip: int = 0
+    limit: int = 10
+    has_more: bool = False

@@ -1,8 +1,8 @@
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, status
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, status, Query
 
 from sqlalchemy.orm import Session
-from typing import List, Annotated
+from typing import List, Annotated, Literal
 
 from app.dtos import rating_dtos
 from app.services import rating_services
@@ -14,6 +14,33 @@ router = APIRouter(
     prefix="/rating",
     tags=["Rating of Product"]
 )
+
+@router.get(
+    "/product/{product_id}",
+    response_model=rating_dtos.ProductRatingsResponseDto,
+    status_code=status.HTTP_200_OK,
+    summary="List verified customer ratings for a product",
+)
+def get_product_ratings(
+    product_id: UUID,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=50),
+    rate: int | None = Query(default=None, ge=1, le=5),
+    sort: Literal["recent", "highest", "lowest"] = Query(default="recent"),
+    db: Session = Depends(get_db),
+):
+    result = rating_services.get_product_ratings(
+        db=db,
+        product_id=str(product_id),
+        skip=skip,
+        limit=limit,
+        rate=rate,
+        sort=sort,
+    )
+    if result.error:
+        raise result.error
+    return result.unwrap()
+
 
 @router.post(
     "/product/{product_id}",

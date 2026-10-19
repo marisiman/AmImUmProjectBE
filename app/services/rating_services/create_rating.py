@@ -25,7 +25,12 @@ def create_rating(
 ) -> Result[RatingModel, Exception]:
     try:
         # Cek apakah product_id ada di tabel products
-        product = db.query(ProductModel).filter(ProductModel.id == str(rate.product_id)).first()
+        product = (
+            db.query(ProductModel)
+            .filter(ProductModel.id == str(rate.product_id))
+            .with_for_update()
+            .first()
+        )
         if not product:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

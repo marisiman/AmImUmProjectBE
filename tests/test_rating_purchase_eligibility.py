@@ -29,6 +29,10 @@ class DummyQuery:
         self.joins.append((args, kwargs))
         return self
 
+    def with_for_update(self, *args, **kwargs):
+        self.lock_requested = True
+        return self
+
     def first(self):
         if self.model is not OrderItemModel:
             return self.result
@@ -54,7 +58,8 @@ class DummyDB:
 
     def query(self, model):
         if model is ProductModel:
-            return DummyQuery(self.product, model)
+            self.product_query = DummyQuery(self.product, model)
+            return self.product_query
         if model is OrderItemModel:
             self.purchase_query = DummyQuery(self.purchase_rows, model)
             return self.purchase_query
@@ -154,6 +159,7 @@ def test_rating_is_created_for_matching_completed_purchase():
     assert db.committed == 1
     assert len(db.added) == 1
     assert db.purchase_query.joins[0][0][0] is OrderModel
+    assert db.product_query.lock_requested is True
     assert db.purchase_query.filters
 
 
