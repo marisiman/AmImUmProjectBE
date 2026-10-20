@@ -59,7 +59,7 @@ config.set_main_option("sqlalchemy.url", database_url)
 
 # Logging
 logger = logging.getLogger('alembic')
-logger.info(f"Using database URL: {database_url}")
+logger.info("Database URL configured for Alembic.")
 
 
 def run_migrations_offline() -> None:

@@ -81,12 +81,26 @@ class DummyDB:
         instance.created_at = datetime.now(timezone.utc)
 
 
-def test_rating_is_rejected_when_user_has_no_eligible_completed_purchase():
+def stub_eligible_variants(monkeypatch, rows):
+    def eligible_rows(_db, product_id, user_id):
+        return [
+            (101, "Tanpa Lampu", "Type_01")
+            for row in rows
+            if row.product_id == product_id
+            and row.customer_id == user_id
+            and row.status == "completed"
+        ]
+
+    monkeypatch.setattr(rating_service, "get_eligible_variant_rows", eligible_rows)
+
+
+def test_rating_is_rejected_when_user_has_no_eligible_completed_purchase(monkeypatch):
     product_id = uuid.uuid4()
     db = DummyDB(
         product=SimpleNamespace(id=str(product_id)),
         purchase_rows=[],
     )
+    stub_eligible_variants(monkeypatch, db.purchase_rows)
 
     result = rating_service.create_rating(
         db,
@@ -110,7 +124,7 @@ def test_rating_is_rejected_when_user_has_no_eligible_completed_purchase():
     ],
     ids=["different-owner", "different-product", "not-fulfilled"],
 )
-def test_rating_requires_matching_buyer_product_and_completed_status(row_overrides):
+def test_rating_requires_matching_buyer_product_and_completed_status(monkeypatch, row_overrides):
     product_id = uuid.uuid4()
     row = {
         "product_id": str(product_id),
@@ -122,6 +136,7 @@ def test_rating_requires_matching_buyer_product_and_completed_status(row_overrid
         product=SimpleNamespace(id=str(product_id)),
         purchase_rows=[SimpleNamespace(**row)],
     )
+    stub_eligible_variants(monkeypatch, db.purchase_rows)
 
     result = rating_service.create_rating(
         db,
@@ -136,7 +151,7 @@ def test_rating_requires_matching_buyer_product_and_completed_status(row_overrid
     assert db.committed == 0
 
 
-def test_rating_is_created_for_matching_completed_purchase():
+def test_rating_is_created_for_matching_completed_purchase(monkeypatch):
     product_id = uuid.uuid4()
     db = DummyDB(
         product=SimpleNamespace(id=str(product_id)),
@@ -148,6 +163,7 @@ def test_rating_is_created_for_matching_completed_purchase():
             )
         ],
     )
+    stub_eligible_variants(monkeypatch, db.purchase_rows)
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),
@@ -158,12 +174,11 @@ def test_rating_is_created_for_matching_completed_purchase():
     assert result.error is None
     assert db.committed == 1
     assert len(db.added) == 1
-    assert db.purchase_query.joins[0][0][0] is OrderModel
+    assert db.added[0].variant_id == 101
     assert db.product_query.lock_requested is True
-    assert db.purchase_query.filters
 
 
-def test_existing_rating_is_rejected_and_customer_can_edit_instead():
+def test_existing_rating_is_rejected_and_customer_can_edit_instead(monkeypatch):
     product_id = uuid.uuid4()
     db = DummyDB(
         product=SimpleNamespace(id=str(product_id)),
@@ -176,6 +191,7 @@ def test_existing_rating_is_rejected_and_customer_can_edit_instead():
         ],
         existing_rating=SimpleNamespace(id=22),
     )
+    stub_eligible_variants(monkeypatch, db.purchase_rows)
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),

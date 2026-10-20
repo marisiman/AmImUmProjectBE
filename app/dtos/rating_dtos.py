@@ -14,6 +14,7 @@ class RatingCreateDto(BaseModel):
         description="Rating harus bernilai antara 1 dan 5."
     )
     review: Optional[str] = Field(default=None, max_length=100)
+    variant_id: Optional[int] = Field(default=None, ge=1)
 
 class RatingInfoCreateDto(BaseModel):
     id: int
@@ -21,6 +22,7 @@ class RatingInfoCreateDto(BaseModel):
     review: Optional[str] = None
     product_name: Optional[str] = None
     rater_name: Optional[str] = None
+    variant_name: Optional[str] = None
     created_at: datetime
 
 class RatingResponseCreateDto(BaseModel):
@@ -49,6 +51,7 @@ class MyRatingListDto(BaseModel):
     rate: int
     review: Optional[str] = None
     product_name: Optional[str] = None
+    variant_name: Optional[str] = None
     created_at: datetime
     # updated_at: datetime
 
@@ -89,8 +92,21 @@ class ProductRatingReviewDto(BaseModel):
     rate: int
     review: Optional[str] = None
     rater_name: str = "Pembeli"
+    variant_name: Optional[str] = None
     created_at: datetime
     verified_purchase: bool = True
+
+
+class EligibleRatingVariantDto(BaseModel):
+    variant_id: Optional[int] = None
+    variant_name: str
+
+
+class EligibleRatingVariantsResponseDto(BaseModel):
+    status_code: int = Field(default=200)
+    message: str = Field(default="Varian dari pesanan selesai berhasil dimuat.")
+    data: List[EligibleRatingVariantDto]
+
 
 
 class ProductRatingSummaryDto(BaseModel):

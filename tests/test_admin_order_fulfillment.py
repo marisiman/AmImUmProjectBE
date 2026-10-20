@@ -134,6 +134,36 @@ def test_admin_update_status_accepts_settlement_for_payment_callback_compatibili
     assert db.rolled_back == 0
 
 
+def test_admin_cannot_mark_pending_order_completed_without_payment_confirmation(monkeypatch):
+    order = SimpleNamespace(
+        id="order-pending",
+        status="pending",
+        total_price=18500,
+        shipment_id=None,
+        delivery_type="pickup",
+        notes="[PAYMENT: qris_manual]",
+        created_at="2026-09-11T00:00:00",
+        customer_id="customer-pending",
+        customer_email="customer@example.com",
+        customer_name="Customer Test",
+        my_shipping=None,
+    )
+    db = _DummyDB(order)
+    monkeypatch.setattr(admin_order, "redis_client", None)
+
+    result = admin_order.update_order_status_admin(
+        db=db,
+        order_id="order-pending",
+        new_status="completed",
+    )
+
+    assert result.error is not None
+    assert getattr(result.error, "status_code", None) == 409
+    assert order.status == "pending"
+    assert db.committed == 0
+
+
+
 def test_admin_update_status_does_not_fail_when_customer_email_fails(monkeypatch):
     order = SimpleNamespace(
         id="order-2",

@@ -32,6 +32,7 @@ ALLOWED_ADMIN_ORDER_STATUSES = {
     "settlement",
     "refund",
 }
+COMPLETABLE_ORDER_STATUSES = {"paid", "processing", "shipped", "capture", "settlement", "completed"}
 
 
 def _to_order_info_dto(order: OrderModel) -> order_dtos.GetOrderInfoDto:
@@ -189,6 +190,17 @@ def update_order_status_admin(
                     error="Not Found",
                     message=f"Order with ID {order_id} not found."
                 ).dict()
+            )
+
+        previous_status = str(order.status or "").strip().lower()
+        if normalized_status == "completed" and previous_status not in COMPLETABLE_ORDER_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=ErrorResponseDto(
+                    status_code=status.HTTP_409_CONFLICT,
+                    error="Invalid Order Transition",
+                    message="Pesanan harus memiliki status pembayaran berhasil atau sedang diproses sebelum dinyatakan selesai.",
+                ).model_dump(),
             )
 
         normalized_code_tracking = (code_tracking or "").strip()

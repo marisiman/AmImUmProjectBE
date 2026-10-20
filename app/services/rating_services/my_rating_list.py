@@ -1,12 +1,13 @@
 from fastapi import HTTPException, status
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, DataError, IntegrityError
 
 import json
 
 from app.models.rating_model import RatingModel
+from app.models.pack_type_model import PackTypeModel
+from app.services.rating_services.eligible_rating_variants import format_variant_name
 from app.dtos.rating_dtos import MyRatingListDto, AllMyRatingListResponseDto
 from app.dtos.error_response_dtos import ErrorResponseDto
 
@@ -25,7 +26,7 @@ def my_rating_list(
     ) -> Result[AllMyRatingListResponseDto, Exception]:  # Mengembalikan List DTO
     try:
         # Redis key for caching
-        redis_key = f"ratinglists:{user_id}:{skip}:{limit}"
+        redis_key = f"ratinglists:v2:{user_id}:{skip}:{limit}"
 
         # Check if address data exists in Redis
         cached_rates = redis_client.get(redis_key)
@@ -42,12 +43,14 @@ def my_rating_list(
             ))
 
         # Query untuk mengambil produk berdasarkan product_by_id
-        rate_model = db.execute(
-            select(RatingModel)
-            .where(RatingModel.user_id == user_id)  # Filter dengan production_id
+        rate_model = (
+            db.query(RatingModel, PackTypeModel.name, PackTypeModel.variant)
+            .outerjoin(PackTypeModel, PackTypeModel.id == RatingModel.variant_id)
+            .filter(RatingModel.user_id == user_id)
             .offset(skip)
             .limit(limit)
-        ).scalars().all()
+            .all()
+        )
 
         if not rate_model:
             raise HTTPException(
@@ -66,9 +69,14 @@ def my_rating_list(
                 rate=rate_count.rate,
                 review=rate_count.review,
                 product_name=rate_count.product_name,
-                created_at=rate_count.created_at
+                variant_name=(
+                    format_variant_name(variant_name, variant_type)
+                    if rate_count.variant_id is not None and variant_name
+                    else None
+                ),
+                created_at=rate_count.created_at,
             )
-            for rate_count in rate_model
+            for rate_count, variant_name, variant_type in rate_model
         ]
 
         # Cache the data in Redis

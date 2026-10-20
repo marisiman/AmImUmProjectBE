@@ -11,6 +11,10 @@ from app.models.order_item_model import OrderItemModel
 from app.models.rating_model import RatingModel
 from app.dtos.rating_dtos import RatingCreateOfIdProductDto, RatingCreateDto, RatingInfoCreateDto, RatingResponseCreateDto
 from app.dtos.error_response_dtos import ErrorResponseDto
+from app.services.rating_services.eligible_rating_variants import (
+    format_variant_name,
+    get_eligible_variant_rows,
+)
 
 from app.services.rating_services.support_function import handle_db_error
 
@@ -41,17 +45,9 @@ def create_rating(
                 ).dict()
             )
 
-        purchase = (
-            db.query(OrderItemModel)
-            .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
-            .filter(
-                OrderItemModel.product_id == str(rate.product_id),
-                OrderModel.customer_id == user_id,
-                OrderModel.status == "completed",
-            )
-            .first()
-        )
-        if not purchase:
+        eligible_variants = get_eligible_variant_rows(db, str(rate.product_id), user_id)
+        eligible_variant_ids = {row[0] for row in eligible_variants}
+        if not eligible_variants:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ErrorResponseDto(
@@ -60,6 +56,39 @@ def create_rating(
                     message="Rating hanya dapat diberikan setelah pesanan produk berstatus selesai.",
                 ).model_dump(),
             )
+
+        if "variant_id" in create_rate.model_fields_set:
+            selected_variant_id = create_rate.variant_id
+            if selected_variant_id not in eligible_variant_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=ErrorResponseDto(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        error="Purchased Variant Required",
+                        message="Pilih varian yang benar-benar ada pada pesanan selesai Anda.",
+                    ).model_dump(),
+                )
+        else:
+            if len(eligible_variant_ids) != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=ErrorResponseDto(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        error="Variant Selection Required",
+                        message="Pilih varian yang dibeli sebelum mengirim rating.",
+                    ).model_dump(),
+                )
+            selected_variant_id = next(iter(eligible_variant_ids))
+
+        selected_variant = next(
+            (row for row in eligible_variants if row[0] == selected_variant_id),
+            None,
+        )
+        variant_name = (
+            format_variant_name(selected_variant[1], selected_variant[2])
+            if selected_variant and selected_variant_id is not None
+            else None
+        )
 
         existing_rating = (
             db.query(RatingModel)
@@ -80,7 +109,8 @@ def create_rating(
             )
 
         rate_instance = RatingModel(
-            **create_rate.model_dump()
+            **create_rate.model_dump(exclude={"variant_id"}),
+            variant_id=selected_variant_id,
         )
         rate_instance.product_id = str(rate.product_id)  # Konversi UUID ke string
         rate_instance.user_id = user_id
@@ -94,6 +124,7 @@ def create_rating(
             review=rate_instance.review,
             product_name=rate_instance.product_name,
             rater_name=rate_instance.rater_name,
+            variant_name=variant_name,
             created_at=rate_instance.created_at
         )
 

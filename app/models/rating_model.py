@@ -12,6 +12,7 @@ class RatingModel(Base):
     review = Column(String(100), nullable=True)  # Pertahankan jika 100 karakter sudah cukup
     product_id = Column(CHAR(36), ForeignKey("products.id"), nullable=False, index=True)  # UUID from ProductModel
     user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # UUID from UserModel
+    variant_id = Column(Integer, ForeignKey("pack_types.id"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # Relationships

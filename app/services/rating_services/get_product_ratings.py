@@ -1,7 +1,7 @@
 from typing import Literal
 
 from fastapi import HTTPException, status
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -14,8 +14,12 @@ from app.dtos.rating_dtos import (
 from app.models.order_item_model import OrderItemModel
 from app.models.order_model import OrderModel
 from app.models.product_model import ProductModel
+from app.models.pack_type_model import PackTypeModel
+from app.models.payment_model import PaymentModel
 from app.models.rating_model import RatingModel
 from app.models.user_model import UserModel
+from app.services.rating_services.eligible_rating_variants import format_variant_name
+from app.services.rating_services.purchase_eligibility import successful_transaction_condition
 from app.services.rating_services.support_function import handle_db_error
 from app.utils.result import Result, build
 
@@ -57,21 +61,29 @@ def get_product_ratings(
                 ).model_dump(),
             )
 
-        verified_customer_ids = (
-            db.query(OrderModel.customer_id.label("customer_id"))
-            .join(OrderItemModel, OrderItemModel.order_id == OrderModel.id)
+        verified_purchase_exists = (
+            db.query(OrderItemModel.id)
+            .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+            .outerjoin(PaymentModel, PaymentModel.order_id == OrderModel.id)
+            .outerjoin(PackTypeModel, PackTypeModel.id == OrderItemModel.variant_id)
             .filter(
-                OrderItemModel.product_id == product_id,
+                OrderItemModel.product_id == RatingModel.product_id,
+                OrderModel.customer_id == RatingModel.user_id,
                 OrderModel.status == "completed",
-                OrderModel.customer_id.is_not(None),
+                successful_transaction_condition(),
+                or_(
+                    RatingModel.variant_id.is_(None),
+                    and_(
+                        OrderItemModel.variant_id == RatingModel.variant_id,
+                        PackTypeModel.product_id == RatingModel.product_id,
+                    ),
+                ),
             )
-            .distinct()
-            .subquery()
+            .exists()
         )
-
         verified_rating_filter = (
             RatingModel.product_id == product_id,
-            RatingModel.user_id.in_(select(verified_customer_ids.c.customer_id)),
+            verified_purchase_exists,
         )
         latest_rating_timestamps = (
             db.query(
@@ -128,8 +140,14 @@ def get_product_ratings(
             "lowest": (RatingModel.rate.asc(), RatingModel.created_at.desc(), RatingModel.id.desc()),
         }
         query = (
-            db.query(RatingModel, UserModel.firstname)
+            db.query(
+                RatingModel,
+                UserModel.firstname,
+                PackTypeModel.name,
+                PackTypeModel.variant,
+            )
             .join(UserModel, UserModel.id == RatingModel.user_id)
+            .outerjoin(PackTypeModel, PackTypeModel.id == RatingModel.variant_id)
             .filter(*one_rating_per_customer_filter)
         )
         if rate is not None:
@@ -148,10 +166,15 @@ def get_product_ratings(
                 rate=rating.rate,
                 review=rating.review,
                 rater_name=_masked_name(firstname),
+                variant_name=(
+                    format_variant_name(variant_name, variant_type)
+                    if rating.variant_id is not None and variant_name
+                    else None
+                ),
                 created_at=rating.created_at,
                 verified_purchase=True,
             )
-            for rating, firstname in rows[:limit]
+            for rating, firstname, variant_name, variant_type in rows[:limit]
         ]
 
         return build(
