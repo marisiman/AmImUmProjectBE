@@ -409,6 +409,11 @@ def test_rating_write_rejects_a_completed_order_with_pending_transaction(rating_
 
 
 
+def test_rating_write_rejects_a_null_star_rating():
+    with pytest.raises(ValidationError):
+        RatingCreateDto(rate=None, review="Tidak memilih bintang")
+
+
 def test_rating_review_text_limit_matches_existing_database_column():
     with pytest.raises(ValidationError):
         RatingCreateDto(rate=5, review="x" * 101)

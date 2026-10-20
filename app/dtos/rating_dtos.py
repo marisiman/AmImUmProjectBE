@@ -8,7 +8,7 @@ class RatingCreateOfIdProductDto(BaseModel):
     product_id: uuid.UUID
 
 class RatingCreateDto(BaseModel):
-    rate: Optional[int] = Field(
+    rate: int = Field(
         ge=1,
         le=5,
         description="Rating harus bernilai antara 1 dan 5."
