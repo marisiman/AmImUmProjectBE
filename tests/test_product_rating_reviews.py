@@ -119,6 +119,7 @@ def rating_db():
                 RatingModel(id=5, product_id=product_id, user_id=users["unfinished"].id, rate=1, review="Belum selesai", created_at=datetime(2026, 2, 5, tzinfo=timezone.utc)),
                 RatingModel(id=6, product_id=product_id, user_id=users["verified_mismatch"].id, variant_id=102, rate=1, review="Varian tidak dibeli", created_at=datetime(2026, 2, 6, tzinfo=timezone.utc)),
                 RatingModel(id=7, product_id=product_id, user_id=users["verified_payment_pending"].id, variant_id=101, rate=2, review="Transaksi belum berhasil", created_at=datetime(2026, 2, 7, tzinfo=timezone.utc)),
+                RatingModel(id=9, product_id=product_id, user_id=users["verified_high"].id, variant_id=102, rate=1, review="Varian lain di waktu sama", created_at=datetime(2026, 2, 1, tzinfo=timezone.utc)),
             ]
         )
         session.commit()

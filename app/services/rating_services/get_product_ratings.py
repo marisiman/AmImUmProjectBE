@@ -103,7 +103,7 @@ def get_product_ratings(
                     RatingModel.created_at == latest_rating_timestamps.c.created_at,
                 ),
             )
-            .filter(RatingModel.product_id == product_id)
+            .filter(*verified_rating_filter)
             .group_by(RatingModel.user_id)
             .subquery()
         )
