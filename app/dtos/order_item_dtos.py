@@ -17,3 +17,7 @@ class OrderItemDto(BaseModel):
     product_image: Optional[str] = None
     variant_image: Optional[str] = None
     created_at: datetime
+
+
+class OrderItemDetailDto(OrderItemDto):
+    has_rating: bool = False

@@ -33,6 +33,9 @@ class DummyQuery:
     def first(self):
         return self.result
 
+    def all(self):
+        return self.result or []
+
 
 class DummyDB:
     def __init__(self, execute_results=None, query_result=None):
@@ -420,6 +423,67 @@ def test_detail_order_handles_missing_shipping_relations(monkeypatch, detail_ord
     assert result.data.status_code == 200
     assert result.data.data.my_shipping["my_address"] is None
     assert result.data.data.my_shipping["my_courier"] is None
+
+
+def test_detail_order_reports_rating_state_for_each_order_item(monkeypatch, detail_order_module):
+    order_items = [SimpleNamespace(id=11), SimpleNamespace(id=12)]
+    item_payloads = [
+        {
+            "id": item_id,
+            "product_id": "product-1",
+            "variant_id": 5,
+            "product_name": "Produk",
+            "variant_product": "Original",
+            "variant_discount": 0,
+            "quantity": 1,
+            "price_per_item": 5000,
+            "total_price": 5000,
+            "created_at": "2026-04-21T00:00:00",
+        }
+        for item_id in (11, 12)
+    ]
+    order = SimpleNamespace(
+        id="order-1",
+        status="completed",
+        total_price=10000,
+        delivery_type="delivery",
+        notes=None,
+        customer_name="Aris",
+        created_at="2026-04-21T00:00:00",
+        shipping_cost=0,
+        my_shipping=None,
+        order_items=order_items,
+        order_item_lists=item_payloads,
+    )
+    db = DummyDB(execute_results=[order], query_result=[(11,)])
+    monkeypatch.setattr(detail_order_module, "redis_client", None)
+
+    result = detail_order_module.detail_order(db, "user-1", "order-1")
+
+    assert result.error is None
+    assert [item.has_rating for item in result.data.data.order_item_lists] == [True, False]
+
+
+def test_invalidate_order_detail_cache_advances_the_versioned_generation(monkeypatch, detail_order_module):
+    class Cache:
+        def __init__(self):
+            self.increments = []
+            self.expirations = []
+
+        def incr(self, key):
+            self.increments.append(key)
+
+        def expire(self, key, ttl):
+            self.expirations.append((key, ttl))
+
+    cache = Cache()
+    monkeypatch.setattr(detail_order_module, "redis_client", cache)
+
+    detail_order_module.invalidate_order_detail_cache("user-1", "order-1")
+
+    generation_key = "order-detail-generation:v1:user-1:order-1"
+    assert cache.increments == [generation_key]
+    assert cache.expirations == [(generation_key, detail_order_module.GENERATION_KEY_TTL)]
 
 
 def test_edit_order_switches_to_pickup(monkeypatch, edit_order_module):

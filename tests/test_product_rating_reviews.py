@@ -558,10 +558,15 @@ class _RatingCacheSpy:
             "ratinglists:v3:another-user:0:0:100",
         ]
         self.generations = {}
+        self.expirations = []
 
     def incr(self, key: str):
         self.generations[key] = self.generations.get(key, 0) + 1
         return self.generations[key]
+
+    def expire(self, key: str, ttl: int):
+        self.expirations.append((key, ttl))
+        return True
 
     def scan_iter(self, pattern: str):
         self.patterns.append(pattern)
@@ -575,10 +580,19 @@ class _RatingCacheSpy:
 
 def test_create_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
     cache_service = import_module("app.services.rating_services.my_rating_list")
+    order_detail_service = import_module("app.services.order_services.detail_order")
     db, product_id = rating_db
     user_id = db.query(UserModel.id).filter(UserModel.email == "verified_new@example.test").scalar()
+    order_id = (
+        db.query(OrderModel.id)
+        .join(OrderItemModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .scalar()
+    )
     cache = _RatingCacheSpy(user_id)
+    order_cache = _RatingCacheSpy(user_id)
     monkeypatch.setattr(cache_service, "redis_client", cache)
+    monkeypatch.setattr(order_detail_service, "redis_client", order_cache)
 
     result = create_rating(
         db,
@@ -591,6 +605,9 @@ def test_create_rating_invalidates_the_users_cached_rating_list(monkeypatch, rat
     assert cache.generations == {f"ratinglist-generation:v1:{user_id}": 1}
     assert cache.patterns == [f"ratinglists:v3:{user_id}:*"]
     assert cache.deleted == [f"ratinglists:v3:{user_id}:0:0:100"]
+    order_generation_key = f"order-detail-generation:v1:{user_id}:{order_id}"
+    assert order_cache.generations == {order_generation_key: 1}
+    assert order_cache.expirations == [(order_generation_key, order_detail_service.GENERATION_KEY_TTL)]
 
 
 def test_edit_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
@@ -616,15 +633,33 @@ def test_edit_rating_invalidates_the_users_cached_rating_list(monkeypatch, ratin
 
 def test_delete_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
     cache_service = import_module("app.services.rating_services.my_rating_list")
+    order_detail_service = import_module("app.services.order_services.detail_order")
     delete_service = import_module("app.services.rating_services.delete_my_review")
-    db, _ = rating_db
-    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_no_variant@example.test").scalar()
+    order_item = (
+        db.query(OrderItemModel)
+        .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .one()
+    )
+    db.add(RatingModel(
+        id=99,
+        product_id=product_id,
+        user_id=user_id,
+        order_item_id=order_item.id,
+        rate=5,
+        review="Rating untuk uji cache",
+    ))
+    db.commit()
     cache = _RatingCacheSpy(user_id)
+    order_cache = _RatingCacheSpy(user_id)
     monkeypatch.setattr(cache_service, "redis_client", cache)
+    monkeypatch.setattr(order_detail_service, "redis_client", order_cache)
 
     result = delete_service.delete_my_review(
         db,
-        review_id_delete=DeleteReviewDto(rating_id=1),
+        review_id_delete=DeleteReviewDto(rating_id=99),
         user_id=user_id,
     )
 
@@ -632,6 +667,9 @@ def test_delete_rating_invalidates_the_users_cached_rating_list(monkeypatch, rat
     assert cache.generations == {f"ratinglist-generation:v1:{user_id}": 1}
     assert cache.patterns == [f"ratinglists:v3:{user_id}:*"]
     assert cache.deleted == [f"ratinglists:v3:{user_id}:0:0:100"]
+    order_generation_key = f"order-detail-generation:v1:{user_id}:{order_item.order_id}"
+    assert order_cache.generations == {order_generation_key: 1}
+    assert order_cache.expirations == [(order_generation_key, order_detail_service.GENERATION_KEY_TTL)]
 
 
 class _RatingCacheCommandFailure:

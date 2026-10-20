@@ -332,7 +332,7 @@ async def get_my_order(
 
 @router.get(
     "/detail/{order_id}",
-    response_model=order_dtos.GetOrderDetailResponseDto,
+    response_model=order_dtos.GetCustomerOrderDetailResponseDto,
     status_code=status.HTTP_200_OK,
     responses={
         status.HTTP_200_OK: {

@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError, DataError, IntegrityError
 from app.models.order_model import OrderModel
 from app.models.shipment_model import ShipmentModel
 from app.models.order_item_model import OrderItemModel
+from app.models.rating_model import RatingModel
 from app.dtos import order_dtos
 
 import json
@@ -23,28 +24,56 @@ from app.libs.redis_config import custom_json_serializer, redis_client
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 3600
-CACHE_VERSION = "v2-images"
+CACHE_VERSION = "v3-rating-status"
+GENERATION_KEY_TTL = CACHE_TTL * 2 + 60
+ORDER_DETAIL_GENERATION_PREFIX = "order-detail-generation:v1"
 RESPONSE_MESSAGE = "Order details accessed successfully"
+
+
+def _order_detail_generation_key(user_id: str, order_id: str) -> str:
+    return f"{ORDER_DETAIL_GENERATION_PREFIX}:{user_id}:{order_id}"
+
+
+def invalidate_order_detail_cache(user_id: str, order_id: str) -> None:
+    """Advance the per-order cache generation after a rating mutation."""
+    if not redis_client or not order_id:
+        return
+
+    try:
+        generation_key = _order_detail_generation_key(user_id, order_id)
+        redis_client.incr(generation_key)
+        # Keep the generation alive longer than any detail cache entry it invalidates.
+        redis_client.expire(generation_key, GENERATION_KEY_TTL)
+    except Exception as cache_error:
+        logger.warning(
+            "order_detail_cache_generation_failed user_id=%s order_id=%s error_type=%s",
+            user_id,
+            order_id,
+            type(cache_error).__name__,
+        )
+
 
 def detail_order(
         db: Session,
         user_id: str,
         order_id: str
-    ) -> Result[order_dtos.GetOrderDetailResponseDto, Exception]:
+    ) -> Result[order_dtos.GetCustomerOrderDetailResponseDto, Exception]:
     try:
-        # Redis key for caching
-        redis_key = f"order:{CACHE_VERSION}:{user_id}:{order_id}"
-
-        # Check if product data exists in Redis
+        # Redis is a cache only; generation changes make stale in-flight reads unreachable.
+        redis_key = None
         cached_order = None
         if redis_client:
             try:
+                generation = redis_client.get(_order_detail_generation_key(user_id, order_id))
+                generation = int(generation) if generation is not None else 0
+                redis_key = f"order:{CACHE_VERSION}:{user_id}:{order_id}:{generation}"
                 cached_order = redis_client.get(redis_key)
             except Exception as cache_error:
-                logger.warning("Failed to read order detail cache for key %s: %s", redis_key, cache_error)
+                redis_key = None
+                logger.warning("Failed to read order detail cache for key %s: %s", order_id, cache_error)
         if cached_order:
-            order_detail_dto = order_dtos.GetOrderDetailDto(**json.loads(cached_order))
-            return build(data=order_dtos.GetOrderDetailResponseDto(
+            order_detail_dto = order_dtos.GetCustomerOrderDetailDto(**json.loads(cached_order))
+            return build(data=order_dtos.GetCustomerOrderDetailResponseDto(
                 status_code=200,
                 message=RESPONSE_MESSAGE,
                 data=order_detail_dto
@@ -76,8 +105,28 @@ def detail_order(
                 ).dict()
             )
 
+        # Include per-order-item review state using one bounded query.
+        order_item_lists = order.order_item_lists or []
+        order_item_ids = [item["id"] for item in order_item_lists if item.get("id") is not None]
+        rated_order_item_ids = set()
+        if order_item_ids:
+            rated_order_item_ids = {
+                row[0]
+                for row in db.query(RatingModel.order_item_id)
+                .filter(RatingModel.order_item_id.in_(order_item_ids))
+                .all()
+                if row and row[0] is not None
+            }
+        order_item_detail_lists = [
+            order_dtos.OrderItemDetailDto(
+                **item,
+                has_rating=item.get("id") in rated_order_item_ids,
+            )
+            for item in order_item_lists
+        ]
+
         # Format data order ke dalam DTO
-        order_detail_dto = order_dtos.GetOrderDetailDto(
+        order_detail_dto = order_dtos.GetCustomerOrderDetailDto(
             id=order.id,
             status=order.status,
             total_price=order.total_price,
@@ -87,18 +136,18 @@ def detail_order(
             created_at=order.created_at,
             shipping_cost=order.shipping_cost,
             my_shipping=order.my_shipping,
-            order_item_lists=order.order_item_lists
+            order_item_lists=order_item_detail_lists
         )
 
         # Cache the result in Redis
-        if redis_client:
+        if redis_client and redis_key:
             try:
                 redis_client.setex(redis_key, CACHE_TTL, json.dumps(order_detail_dto.model_dump(), default=custom_json_serializer))
             except Exception as cache_error:
                 logger.warning("Failed to write order detail cache for key %s: %s", redis_key, cache_error)
 
         # Return DTO dengan respons yang telah dibangun
-        return build(data=order_dtos.GetOrderDetailResponseDto(
+        return build(data=order_dtos.GetCustomerOrderDetailResponseDto(
             status_code=status.HTTP_200_OK,
             message=RESPONSE_MESSAGE,
             data=order_detail_dto,

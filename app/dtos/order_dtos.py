@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.dtos.order_item_dtos import OrderItemDto
+from app.dtos.order_item_dtos import OrderItemDetailDto, OrderItemDto
 from app.dtos.shipment_dtos import MyShipmentAddressOrderInfoDto
 from app.models.enums import DeliveryTypeEnum
 
@@ -112,10 +112,30 @@ class GetOrderDetailDto(BaseModel):
     my_shipping: Optional[MyShipmentAddressOrderInfoDto]
     order_item_lists: List[OrderItemDto]
 
+
+class GetCustomerOrderDetailDto(BaseModel):
+    id: str
+    status: str
+    total_price: Optional[float] = 0.0
+    delivery_type: str
+    notes: Optional[str]
+    customer_name: str
+    created_at: datetime
+    shipping_cost: Optional[float] = 0.0
+    my_shipping: Optional[MyShipmentAddressOrderInfoDto]
+    order_item_lists: List[OrderItemDetailDto]
+
+
 class GetOrderDetailResponseDto(BaseModel):
     status_code: int
     message: str
     data: GetOrderDetailDto
+
+
+class GetCustomerOrderDetailResponseDto(BaseModel):
+    status_code: int
+    message: str
+    data: GetCustomerOrderDetailDto
 
 
 class QrisPaymentConfirmationDataDto(BaseModel):

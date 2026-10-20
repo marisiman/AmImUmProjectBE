@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.rating_model import RatingModel
+from app.models.order_item_model import OrderItemModel
 from app.dtos import rating_dtos
 from app.dtos.error_response_dtos import ErrorResponseDto
 
 from app.services.rating_services.my_rating_list import invalidate_my_rating_list_cache
+from app.services.order_services.detail_order import invalidate_order_detail_cache
 from app.utils.error_parser import find_errr_from_args
 from app.utils.result import build, Result
 
@@ -40,6 +42,14 @@ def delete_my_review(
                 ).dict()
             ))
 
+        linked_order_id = None
+        if rate_model.order_item_id is not None:
+            linked_order_id = (
+                db.query(OrderItemModel.order_id)
+                .filter(OrderItemModel.id == rate_model.order_item_id)
+                .scalar()
+            )
+
         review_delete_info = rating_dtos.InfoDeleteReviewDto(
             rating_id= rate_model.id,
             rate=rate_model.rate,
@@ -51,6 +61,8 @@ def delete_my_review(
         db.delete(rate_model)
         db.commit()
         invalidate_my_rating_list_cache(user_id)
+        if linked_order_id:
+            invalidate_order_detail_cache(user_id, str(linked_order_id))
 
         return build(data=rating_dtos.DeleteReviewResponseDto(
             status_code=status.HTTP_200_OK,

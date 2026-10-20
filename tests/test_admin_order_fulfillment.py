@@ -58,6 +58,38 @@ def test_admin_order_status_payload_accepts_tracking_code():
     assert payload.code_tracking == "JNE123"
 
 
+def test_admin_order_detail_does_not_expose_customer_rating_state():
+    order = SimpleNamespace(
+        id="order-1",
+        status="completed",
+        total_price=5000,
+        delivery_type="delivery",
+        notes=None,
+        customer_name="Customer Test",
+        created_at="2026-09-11T00:00:00",
+        shipping_cost=0,
+        my_shipping=None,
+        order_item_lists=[{
+            "id": 12,
+            "product_id": "product-1",
+            "variant_id": 5,
+            "product_name": "Produk",
+            "variant_product": "Original",
+            "variant_discount": 0,
+            "quantity": 1,
+            "price_per_item": 5000,
+            "total_price": 5000,
+            "created_at": "2026-09-11T00:00:00",
+        }],
+    )
+
+    result = admin_order.get_order_detail_admin(_DummyDB(order), "order-1")
+
+    assert result.error is None
+    item_payload = result.data.data.order_item_lists[0].model_dump()
+    assert "has_rating" not in item_payload
+
+
 def test_admin_update_status_can_store_tracking_code_clear_cache_and_notify_customer(monkeypatch):
     order = SimpleNamespace(
         id="order-1",

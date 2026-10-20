@@ -14,6 +14,7 @@ from app.services.rating_services.eligible_rating_variants import (
     get_eligible_order_item_rows,
 )
 from app.services.rating_services.my_rating_list import invalidate_my_rating_list_cache
+from app.services.order_services.detail_order import invalidate_order_detail_cache
 from app.services.rating_services.support_function import handle_db_error
 from app.utils.result import build, Result
 
@@ -166,6 +167,7 @@ def create_rating(
         db.add(rate_instance)
         db.commit()
         invalidate_my_rating_list_cache(user_id)
+        invalidate_order_detail_cache(user_id, str(selected_order_item[1]))
         db.refresh(rate_instance)
 
         return build(data=RatingResponseCreateDto(
