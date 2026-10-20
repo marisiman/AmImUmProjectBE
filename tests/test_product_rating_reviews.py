@@ -8,7 +8,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from pydantic import ValidationError
 
-from app.dtos.rating_dtos import RatingCreateDto, RatingCreateOfIdProductDto, ReviewDataUpdateDTO
+from app.dtos.rating_dtos import (
+    DeleteReviewDto,
+    RatingCreateDto,
+    RatingCreateOfIdProductDto,
+    ReviewDataUpdateDTO,
+    ReviewIdToUpdateDto,
+)
 from app.libs.sql_alchemy_lib import Base
 from app.models import OrderItemModel, OrderModel, ProductModel, RatingModel, UserModel
 from app.models.pack_type_model import PackTypeModel
@@ -273,6 +279,10 @@ def test_rating_write_rejects_a_completed_order_with_pending_transaction(rating_
 
     assert result.error is not None
     assert getattr(result.error, "status_code", None) == 403
+    error_detail = getattr(result.error, "detail", {})
+    assert error_detail["message"] == (
+        "Rating hanya dapat diberikan setelah pesanan berstatus selesai dan pembayaran berhasil."
+    )
     assert db.query(RatingModel).filter(RatingModel.user_id == user_id).count() == 1
 
 
@@ -380,3 +390,257 @@ def test_public_product_ratings_route_supports_anonymous_filtered_read(rating_db
     assert payload["data"][0]["rate"] == 3
     assert payload["data"][0]["verified_purchase"] is True
     assert payload["data"][0]["rater_name"] == "B***"
+
+
+def test_my_rating_list_falls_back_to_database_when_redis_is_unavailable(monkeypatch, rating_db):
+    rating_list_service = import_module("app.services.rating_services.my_rating_list")
+    db, _ = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    monkeypatch.setattr(rating_list_service, "redis_client", None)
+
+    result = rating_list_service.my_rating_list(db, user_id)
+
+    assert result.error is None
+    expected_ids = {
+        rating_id
+        for (rating_id,) in db.query(RatingModel.id)
+        .filter(RatingModel.user_id == user_id)
+        .all()
+    }
+    assert {rating.id for rating in result.unwrap().data} == expected_ids
+
+
+class _RatingCacheSpy:
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+        self.deleted: list[str] = []
+        self.patterns: list[str] = []
+        self.keys = [
+            f"ratinglists:v3:{user_id}:0:0:100",
+            "ratinglists:v3:another-user:0:0:100",
+        ]
+        self.generations = {}
+
+    def incr(self, key: str):
+        self.generations[key] = self.generations.get(key, 0) + 1
+        return self.generations[key]
+
+    def scan_iter(self, pattern: str):
+        self.patterns.append(pattern)
+        prefix = pattern.removesuffix("*")
+        return iter(key for key in self.keys if key.startswith(prefix))
+
+    def delete(self, key: str):
+        self.deleted.append(key)
+        return 1
+
+
+def test_create_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
+    cache_service = import_module("app.services.rating_services.my_rating_list")
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_new@example.test").scalar()
+    cache = _RatingCacheSpy(user_id)
+    monkeypatch.setattr(cache_service, "redis_client", cache)
+
+    result = create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=UUID(product_id)),
+        RatingCreateDto(rate=5, review="Pembelian sesuai", variant_id=101),
+        user_id,
+    )
+
+    assert result.error is None
+    assert cache.generations == {f"ratinglist-generation:v1:{user_id}": 1}
+    assert cache.patterns == [f"ratinglists:v3:{user_id}:*"]
+    assert cache.deleted == [f"ratinglists:v3:{user_id}:0:0:100"]
+
+
+def test_edit_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
+    cache_service = import_module("app.services.rating_services.my_rating_list")
+    edit_service = import_module("app.services.rating_services.edit_my_review")
+    db, _ = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    cache = _RatingCacheSpy(user_id)
+    monkeypatch.setattr(cache_service, "redis_client", cache)
+
+    result = edit_service.edit_my_review(
+        db,
+        review_id_update=ReviewIdToUpdateDto(rating_id=1),
+        review_update=ReviewDataUpdateDTO(rate=4, review="Ulasan diperbarui"),
+        user_id=user_id,
+    )
+
+    assert result.error is None
+    assert cache.generations == {f"ratinglist-generation:v1:{user_id}": 1}
+    assert cache.patterns == [f"ratinglists:v3:{user_id}:*"]
+    assert cache.deleted == [f"ratinglists:v3:{user_id}:0:0:100"]
+
+
+def test_delete_rating_invalidates_the_users_cached_rating_list(monkeypatch, rating_db):
+    cache_service = import_module("app.services.rating_services.my_rating_list")
+    delete_service = import_module("app.services.rating_services.delete_my_review")
+    db, _ = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    cache = _RatingCacheSpy(user_id)
+    monkeypatch.setattr(cache_service, "redis_client", cache)
+
+    result = delete_service.delete_my_review(
+        db,
+        review_id_delete=DeleteReviewDto(rating_id=1),
+        user_id=user_id,
+    )
+
+    assert result.error is None
+    assert cache.generations == {f"ratinglist-generation:v1:{user_id}": 1}
+    assert cache.patterns == [f"ratinglists:v3:{user_id}:*"]
+    assert cache.deleted == [f"ratinglists:v3:{user_id}:0:0:100"]
+
+
+class _RatingCacheCommandFailure:
+    def __init__(self, *, fail_get=False, fail_setex=False):
+        self.fail_get = fail_get
+        self.fail_setex = fail_setex
+
+    def get(self, _key):
+        if self.fail_get:
+            raise RuntimeError("redis get unavailable")
+        return None
+
+    def setex(self, *_args):
+        if self.fail_setex:
+            raise RuntimeError("redis setex unavailable")
+
+
+@pytest.mark.parametrize("cached_value", ["not-json", "[{}]", "{}"])
+def test_my_rating_list_treats_malformed_cached_payload_as_a_miss(
+    monkeypatch, rating_db, cached_value
+):
+    rating_list_service = import_module("app.services.rating_services.my_rating_list")
+    db, _ = rating_db
+
+    class MalformedCache:
+        def get(self, key):
+            if key.startswith("ratinglist-generation:"):
+                return "0"
+            return cached_value
+
+        def setex(self, *_args):
+            return None
+
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    monkeypatch.setattr(rating_list_service, "redis_client", MalformedCache())
+
+    result = rating_list_service.my_rating_list(db, user_id)
+
+    assert result.error is None
+    assert {rating.id for rating in result.unwrap().data} == {1, 9}
+
+
+@pytest.mark.parametrize("failure", ["get", "setex"])
+def test_my_rating_list_survives_redis_command_failures(monkeypatch, rating_db, failure):
+    rating_list_service = import_module("app.services.rating_services.my_rating_list")
+    db, _ = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+    cache = _RatingCacheCommandFailure(
+        fail_get=failure == "get",
+        fail_setex=failure == "setex",
+    )
+    monkeypatch.setattr(rating_list_service, "redis_client", cache)
+
+    result = rating_list_service.my_rating_list(db, user_id)
+
+    assert result.error is None
+    assert {rating.id for rating in result.unwrap().data} == {1, 9}
+
+
+class _RatingCacheInvalidationFailure:
+    def __init__(self, user_id: str, fail_at: str):
+        self.user_id = user_id
+        self.fail_at = fail_at
+
+    def incr(self, _key: str):
+        return 1
+
+    def scan_iter(self, _pattern: str):
+        if self.fail_at == "scan_iter":
+            raise RuntimeError("redis scan unavailable")
+        return iter([f"ratinglists:v3:{self.user_id}:0:0:100"])
+
+    def delete(self, _key: str):
+        if self.fail_at == "delete":
+            raise RuntimeError("redis delete unavailable")
+        return 1
+
+
+@pytest.mark.parametrize("failure", ["scan_iter", "delete"])
+def test_create_rating_succeeds_when_cache_invalidation_fails(monkeypatch, rating_db, failure):
+    cache_service = import_module("app.services.rating_services.my_rating_list")
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_new@example.test").scalar()
+    monkeypatch.setattr(
+        cache_service,
+        "redis_client",
+        _RatingCacheInvalidationFailure(user_id, failure),
+    )
+
+    result = create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=UUID(product_id)),
+        RatingCreateDto(rate=5, review="Pembelian sesuai", variant_id=101),
+        user_id,
+    )
+
+    assert result.error is None
+    assert db.query(RatingModel).filter(RatingModel.user_id == user_id).count() == 1
+
+
+def test_my_rating_list_ignores_a_stale_page_written_after_cache_invalidation(monkeypatch, rating_db):
+    rating_list_service = import_module("app.services.rating_services.my_rating_list")
+    db, _ = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_high@example.test").scalar()
+
+    class ConcurrentMutationCache:
+        def __init__(self):
+            self.generation = 0
+            self.values = {}
+            self.raced = False
+            self.generation_key = f"ratinglist-generation:v1:{user_id}"
+
+        def get(self, key):
+            if key == self.generation_key:
+                return str(self.generation)
+            return self.values.get(key)
+
+        def setex(self, key, _ttl, value):
+            if not self.raced:
+                db.query(RatingModel).filter(RatingModel.id == 1).update(
+                    {RatingModel.review: "Ulasan berubah saat pemuatan"}
+                )
+                db.commit()
+                rating_list_service.invalidate_my_rating_list_cache(user_id)
+                self.raced = True
+            self.values[key] = value
+
+        def incr(self, key):
+            assert key == self.generation_key
+            self.generation += 1
+            return self.generation
+
+        def scan_iter(self, pattern):
+            prefix = pattern.removesuffix("*")
+            return iter(key for key in self.values if key.startswith(prefix))
+
+        def delete(self, key):
+            self.values.pop(key, None)
+            return 1
+
+    cache = ConcurrentMutationCache()
+    monkeypatch.setattr(rating_list_service, "redis_client", cache)
+
+    first_result = rating_list_service.my_rating_list(db, user_id)
+    second_result = rating_list_service.my_rating_list(db, user_id)
+
+    assert first_result.error is None
+    assert second_result.error is None
+    updated_rating = next(rating for rating in second_result.unwrap().data if rating.id == 1)
+    assert updated_rating.review == "Ulasan berubah saat pemuatan"

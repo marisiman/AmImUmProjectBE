@@ -15,6 +15,7 @@ from app.services.rating_services.eligible_rating_variants import (
     format_variant_name,
     get_eligible_variant_rows,
 )
+from app.services.rating_services.my_rating_list import invalidate_my_rating_list_cache
 
 from app.services.rating_services.support_function import handle_db_error
 
@@ -53,7 +54,7 @@ def create_rating(
                 detail=ErrorResponseDto(
                     status_code=status.HTTP_403_FORBIDDEN,
                     error="Purchase Required",
-                    message="Rating hanya dapat diberikan setelah pesanan produk berstatus selesai.",
+                    message="Rating hanya dapat diberikan setelah pesanan berstatus selesai dan pembayaran berhasil.",
                 ).model_dump(),
             )
 
@@ -65,7 +66,7 @@ def create_rating(
                     detail=ErrorResponseDto(
                         status_code=status.HTTP_403_FORBIDDEN,
                         error="Purchased Variant Required",
-                        message="Pilih varian yang benar-benar ada pada pesanan selesai Anda.",
+                        message="Pilih varian yang benar-benar tercatat pada pesanan selesai dan pembayaran berhasil Anda.",
                     ).model_dump(),
                 )
         else:
@@ -116,6 +117,7 @@ def create_rating(
         rate_instance.user_id = user_id
         db.add(rate_instance)
         db.commit()
+        invalidate_my_rating_list_cache(user_id)
         db.refresh(rate_instance)
 
         create_rate_response = RatingInfoCreateDto(

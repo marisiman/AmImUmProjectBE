@@ -11,6 +11,7 @@ from app.models.rating_model import RatingModel
 from app.dtos import rating_dtos
 from app.dtos.error_response_dtos import ErrorResponseDto
 
+from app.services.rating_services.my_rating_list import invalidate_my_rating_list_cache
 from app.utils.error_parser import find_errr_from_args
 from app.utils.result import build, Result
 
@@ -44,6 +45,7 @@ def edit_my_review(
 
         # Simpan perubahan ke dalam database
         db.commit()
+        invalidate_my_rating_list_cache(user_id)
         db.refresh(rate_model)
 
         return build(data=rating_dtos.ReviewInfoUpdateResponseDto(

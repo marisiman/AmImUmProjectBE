@@ -12,6 +12,7 @@ from app.models.rating_model import RatingModel
 from app.dtos import rating_dtos
 from app.dtos.error_response_dtos import ErrorResponseDto
 
+from app.services.rating_services.my_rating_list import invalidate_my_rating_list_cache
 from app.utils.error_parser import find_errr_from_args
 from app.utils.result import build, Result
 
@@ -49,6 +50,7 @@ def delete_my_review(
         # Simpan perubahan ke dalam database
         db.delete(rate_model)
         db.commit()
+        invalidate_my_rating_list_cache(user_id)
 
         return build(data=rating_dtos.DeleteReviewResponseDto(
             status_code=status.HTTP_200_OK,
