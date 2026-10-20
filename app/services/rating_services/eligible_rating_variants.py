@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.dtos.error_response_dtos import ErrorResponseDto
 from app.dtos.rating_dtos import (
+    EligibleRatingOrderItemDto,
+    EligibleRatingOrderItemsResponseDto,
     EligibleRatingVariantDto,
     EligibleRatingVariantsResponseDto,
 )
@@ -25,9 +27,12 @@ def format_variant_name(name: Optional[str], variant: Optional[str]) -> str:
     return " • ".join(parts) if parts else "Produk tanpa varian"
 
 
-def get_eligible_variant_rows(db: Session, product_id: str, user_id: str):
-    rows = (
+def get_eligible_order_item_rows(db: Session, product_id: str, user_id: str):
+    return (
         db.query(
+            OrderItemModel.id,
+            OrderModel.id,
+            OrderModel.created_at,
             OrderItemModel.variant_id,
             PackTypeModel.name,
             PackTypeModel.variant,
@@ -45,17 +50,68 @@ def get_eligible_variant_rows(db: Session, product_id: str, user_id: str):
                 PackTypeModel.product_id == product_id,
             ),
         )
+        .distinct()
+        .order_by(OrderModel.created_at.desc(), OrderItemModel.id.desc())
         .all()
     )
 
-    unique_rows = {}
-    for variant_id, name, variant in rows:
-        unique_rows[variant_id] = (variant_id, name, variant)
 
+def get_eligible_variant_rows(db: Session, product_id: str, user_id: str):
+    # Keep the legacy variant response shape for older clients.
+    unique_rows = {}
+    for _, _, _, variant_id, name, variant in get_eligible_order_item_rows(db, product_id, user_id):
+        unique_rows[variant_id] = (variant_id, name, variant)
     return [
         unique_rows[key]
         for key in sorted(unique_rows, key=lambda value: (value is None, value or 0))
     ]
+
+
+def get_eligible_rating_order_items(
+    db: Session,
+    product_id: str,
+    user_id: str,
+) -> Result[EligibleRatingOrderItemsResponseDto, Exception]:
+    try:
+        product_exists = db.query(ProductModel.id).filter(ProductModel.id == product_id).first()
+        if not product_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ErrorResponseDto(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    error="Not Found",
+                    message="Produk tidak ditemukan.",
+                ).model_dump(),
+            )
+
+        data = [
+            EligibleRatingOrderItemDto(
+                order_item_id=order_item_id,
+                order_id=str(order_id),
+                order_date=order_date,
+                variant_id=variant_id,
+                variant_name=format_variant_name(name, variant),
+            )
+            for order_item_id, order_id, order_date, variant_id, name, variant
+            in get_eligible_order_item_rows(db, product_id, user_id)
+        ]
+        return build(data=EligibleRatingOrderItemsResponseDto(data=data))
+    except SQLAlchemyError as error:
+        return handle_db_error(db, error)
+    except HTTPException as error:
+        return build(error=error)
+    except Exception:
+        db.rollback()
+        return build(
+            error=HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=ErrorResponseDto(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    error="Internal Server Error",
+                    message="Item pesanan belum bisa dimuat. Silakan coba lagi.",
+                ).model_dump(),
+            )
+        )
 
 
 def get_eligible_rating_variants(

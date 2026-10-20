@@ -61,7 +61,7 @@ def get_product_ratings(
                 ).model_dump(),
             )
 
-        verified_purchase_exists = (
+        legacy_verified_purchase_exists = (
             db.query(OrderItemModel.id)
             .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
             .outerjoin(PaymentModel, PaymentModel.order_id == OrderModel.id)
@@ -81,35 +81,62 @@ def get_product_ratings(
             )
             .exists()
         )
-        verified_rating_filter = (
-            RatingModel.product_id == product_id,
-            verified_purchase_exists,
-        )
-        latest_rating_timestamps = (
-            db.query(
-                RatingModel.user_id.label("user_id"),
-                func.max(RatingModel.created_at).label("created_at"),
-            )
-            .filter(*verified_rating_filter)
-            .group_by(RatingModel.user_id)
-            .subquery()
-        )
-        latest_rating_ids = (
-            db.query(func.max(RatingModel.id).label("rating_id"))
-            .join(
-                latest_rating_timestamps,
-                and_(
-                    RatingModel.user_id == latest_rating_timestamps.c.user_id,
-                    RatingModel.created_at == latest_rating_timestamps.c.created_at,
+        exact_order_item_verified_purchase_exists = (
+            db.query(OrderItemModel.id)
+            .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+            .outerjoin(PaymentModel, PaymentModel.order_id == OrderModel.id)
+            .outerjoin(PackTypeModel, PackTypeModel.id == OrderItemModel.variant_id)
+            .filter(
+                OrderItemModel.id == RatingModel.order_item_id,
+                OrderItemModel.product_id == RatingModel.product_id,
+                OrderModel.customer_id == RatingModel.user_id,
+                OrderModel.status == "completed",
+                successful_transaction_condition(),
+                or_(
+                    and_(
+                        OrderItemModel.variant_id.is_(None),
+                        RatingModel.variant_id.is_(None),
+                    ),
+                    OrderItemModel.variant_id == RatingModel.variant_id,
+                ),
+                or_(
+                    OrderItemModel.variant_id.is_(None),
+                    PackTypeModel.product_id == RatingModel.product_id,
                 ),
             )
+            .exists()
+        )
+        verified_rating_filter = (
+            RatingModel.product_id == product_id,
+            or_(
+                and_(
+                    RatingModel.order_item_id.is_not(None),
+                    exact_order_item_verified_purchase_exists,
+                ),
+                and_(
+                    RatingModel.order_item_id.is_(None),
+                    legacy_verified_purchase_exists,
+                ),
+            ),
+        )
+        ranked_verified_ratings = (
+            db.query(
+                RatingModel.id.label("rating_id"),
+                func.row_number().over(
+                    partition_by=(RatingModel.order_item_id, RatingModel.user_id),
+                    order_by=(RatingModel.created_at.desc(), RatingModel.id.desc()),
+                ).label("rating_rank"),
+            )
             .filter(*verified_rating_filter)
-            .group_by(RatingModel.user_id)
             .subquery()
         )
-        one_rating_per_customer_filter = (
+        one_rating_per_order_item_filter = (
             RatingModel.product_id == product_id,
-            RatingModel.id.in_(select(latest_rating_ids.c.rating_id)),
+            RatingModel.id.in_(
+                select(ranked_verified_ratings.c.rating_id).where(
+                    ranked_verified_ratings.c.rating_rank == 1
+                )
+            ),
         )
         summary_fields = [
             func.count(RatingModel.id),
@@ -121,7 +148,7 @@ def get_product_ratings(
         ]
         summary_row = (
             db.query(*summary_fields)
-            .filter(*one_rating_per_customer_filter)
+            .filter(*one_rating_per_order_item_filter)
             .one()
         )
         distribution = {
@@ -148,7 +175,7 @@ def get_product_ratings(
             )
             .join(UserModel, UserModel.id == RatingModel.user_id)
             .outerjoin(PackTypeModel, PackTypeModel.id == RatingModel.variant_id)
-            .filter(*one_rating_per_customer_filter)
+            .filter(*one_rating_per_order_item_filter)
         )
         if rate is not None:
             query = query.filter(RatingModel.rate == rate)

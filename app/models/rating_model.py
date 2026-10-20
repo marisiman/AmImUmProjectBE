@@ -1,10 +1,13 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint, func
 from sqlalchemy.dialects.mysql import CHAR
 from sqlalchemy.orm import relationship, Mapped
 from app.libs.sql_alchemy_lib import Base
 
 class RatingModel(Base):
     __tablename__ = "ratings"
+    __table_args__ = (
+        UniqueConstraint("order_item_id", name="uq_ratings_order_item_id"),
+    )
     
     # Menggunakan Integer ID
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
@@ -13,6 +16,7 @@ class RatingModel(Base):
     product_id = Column(CHAR(36), ForeignKey("products.id"), nullable=False, index=True)  # UUID from ProductModel
     user_id = Column(CHAR(36), ForeignKey("users.id"), nullable=False)  # UUID from UserModel
     variant_id = Column(Integer, ForeignKey("pack_types.id"), nullable=True, index=True)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     # Relationships

@@ -48,7 +48,7 @@ def rating_db():
                 is_active=True,
             )
             for index, (key, name) in enumerate(
-                [("verified_high", "Aris"), ("verified_low", "Budi"), ("legacy", "Citra"), ("wrong_product", "Dina"), ("unfinished", "Eka"), ("verified_new", "Fajar"), ("verified_legacy", "Gita"), ("verified_multi", "Hana"), ("verified_mismatch", "Iwan"), ("verified_payment_pending", "Joko"), ("verified_capture", "Kiki"), ("verified_capture_challenge", "Lala")],
+                [("verified_high", "Aris"), ("verified_low", "Budi"), ("legacy", "Citra"), ("wrong_product", "Dina"), ("unfinished", "Eka"), ("verified_new", "Fajar"), ("verified_legacy", "Gita"), ("verified_multi", "Hana"), ("verified_mismatch", "Iwan"), ("verified_payment_pending", "Joko"), ("verified_capture", "Kiki"), ("verified_capture_challenge", "Lala"), ("verified_no_variant", "Maya")],
                 start=1,
             )
         }
@@ -100,6 +100,7 @@ def rating_db():
         pending_payment_order = add_order("verified_payment_pending", product_id, "completed", 11, variant_id=101)
         capture_order = add_order("verified_capture", product_id, "completed", 12, variant_id=102)
         challenged_order = add_order("verified_capture_challenge", product_id, "completed", 13, variant_id=101)
+        add_order("verified_no_variant", product_id, "completed", 14)
         for payment_order, transaction_status, fraud_status in (
             (settled_order, TransactionStatusEnum.settlement, None),
             (pending_payment_order, TransactionStatusEnum.pending, None),
@@ -161,6 +162,83 @@ def test_public_rating_summary_and_pages_include_only_completed_matching_purchas
     assert second_page.unwrap().has_more is False
 
 
+def test_public_reviews_include_rating_for_completed_item_without_variant(rating_db):
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_no_variant@example.test").scalar()
+    order_item = (
+        db.query(OrderItemModel)
+        .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .one()
+    )
+
+    created = create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=UUID(product_id)),
+        RatingCreateDto(
+            rate=4,
+            review="Produk tanpa varian",
+            order_item_id=order_item.id,
+            variant_id=None,
+        ),
+        user_id,
+    )
+
+    assert created.error is None
+    public_reviews = rating_service.get_product_ratings(db, product_id, skip=0, limit=10)
+
+    assert public_reviews.error is None
+    payload = public_reviews.unwrap()
+    assert payload.summary.total_rater == 3
+    assert any(
+        review.id == created.unwrap().data.id and review.verified_purchase
+        for review in payload.data
+    )
+
+
+def test_public_reviews_count_each_verified_order_item_for_the_same_buyer(rating_db):
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_multi@example.test").scalar()
+    items = (
+        db.query(OrderItemModel)
+        .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .order_by(OrderItemModel.id)
+        .all()
+    )
+    assert len(items) == 2
+    db.add_all([
+        RatingModel(
+            id=20,
+            product_id=product_id,
+            user_id=user_id,
+            variant_id=items[0].variant_id,
+            order_item_id=items[0].id,
+            rate=5,
+            review="Pesanan pertama",
+            created_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        ),
+        RatingModel(
+            id=21,
+            product_id=product_id,
+            user_id=user_id,
+            variant_id=items[1].variant_id,
+            order_item_id=items[1].id,
+            rate=4,
+            review="Pesanan berikutnya",
+            created_at=datetime(2026, 3, 2, tzinfo=timezone.utc),
+        ),
+    ])
+    db.commit()
+
+    result = rating_service.get_product_ratings(db, product_id, skip=0, limit=10)
+
+    assert result.error is None
+    payload = result.unwrap()
+    assert payload.summary.total_rater == 4
+    assert {item.id for item in payload.data} >= {20, 21}
+
+
 def test_duplicate_legacy_rows_use_latest_created_review_not_highest_id(rating_db):
     db, product_id = rating_db
     original = db.query(RatingModel).filter(RatingModel.id == 1).one()
@@ -213,6 +291,50 @@ def test_rating_write_persists_the_variant_bought_in_a_completed_order(rating_db
     assert saved_rating.variant_id == 101
     assert result.unwrap().data.variant_name == "Tanpa Lampu • Type_01"
 
+
+def test_same_product_can_be_rated_once_for_each_completed_order_item(rating_db):
+    db, product_id = rating_db
+    user_id = db.query(UserModel.id).filter(UserModel.email == "verified_multi@example.test").scalar()
+    order_items = (
+        db.query(OrderItemModel)
+        .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .order_by(OrderItemModel.id)
+        .all()
+    )
+    assert len(order_items) == 2
+
+    results = [
+        create_rating(
+            db,
+            RatingCreateOfIdProductDto(product_id=UUID(product_id)),
+            RatingCreateDto(
+                rate=5,
+                review=f"Pesanan item {item.id}",
+                variant_id=item.variant_id,
+                order_item_id=item.id,
+            ),
+            user_id,
+        )
+        for item in order_items
+    ]
+
+    assert all(result.error is None for result in results)
+    assert db.query(RatingModel).filter(RatingModel.user_id == user_id).count() == 2
+
+    duplicate = create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=UUID(product_id)),
+        RatingCreateDto(
+            rate=4,
+            review="Duplikat item pertama",
+            variant_id=order_items[0].variant_id,
+            order_item_id=order_items[0].id,
+        ),
+        user_id,
+    )
+    assert duplicate.error is not None
+    assert getattr(duplicate.error, "status_code", None) == 409
 
 
 def test_legacy_rating_write_auto_selects_a_single_purchased_variant(rating_db):
@@ -281,7 +403,7 @@ def test_rating_write_rejects_a_completed_order_with_pending_transaction(rating_
     assert getattr(result.error, "status_code", None) == 403
     error_detail = getattr(result.error, "detail", {})
     assert error_detail["message"] == (
-        "Rating hanya dapat diberikan setelah pesanan berstatus selesai dan pembayaran berhasil."
+        "Rating hanya dapat diberikan untuk item pesanan yang selesai dan pembayarannya berhasil."
     )
     assert db.query(RatingModel).filter(RatingModel.user_id == user_id).count() == 1
 
@@ -350,13 +472,16 @@ def test_eligible_variant_route_is_registered_and_returns_only_authenticated_pur
     db, product_id = rating_db
     user_id = db.query(UserModel.id).filter(UserModel.email == "verified_multi@example.test").scalar()
     url = f"/rating/product/{product_id}/eligible-variants"
+    order_items_url = f"/rating/product/{product_id}/eligible-order-items"
     client = TestClient(app)
 
     unauthenticated = client.get(url)
+    unauthenticated_order_items = client.get(order_items_url)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[jwt_service.get_jwt_pyload] = lambda: jwt_dto.TokenPayLoad(id=user_id, role="user")
     try:
         authenticated = client.get(url)
+        authenticated_order_items = client.get(order_items_url)
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(jwt_service.get_jwt_pyload, None)
@@ -367,6 +492,19 @@ def test_eligible_variant_route_is_registered_and_returns_only_authenticated_pur
         {"variant_id": 101, "variant_name": "Tanpa Lampu • Type_01"},
         {"variant_id": 102, "variant_name": "Dengan Lampu • Type_02"},
     ]
+    assert unauthenticated_order_items.status_code == 403
+    assert authenticated_order_items.status_code == 200
+    eligible_items = authenticated_order_items.json()["data"]
+    expected_items = (
+        db.query(OrderItemModel)
+        .join(OrderModel, OrderItemModel.order_id == OrderModel.id)
+        .filter(OrderModel.customer_id == user_id, OrderItemModel.product_id == product_id)
+        .all()
+    )
+    assert {item["order_item_id"] for item in eligible_items} == {item.id for item in expected_items}
+    assert {item["variant_id"] for item in eligible_items} == {101, 102}
+    assert all(item["order_id"] for item in eligible_items)
+    assert all(item["order_date"] for item in eligible_items)
 
 
 

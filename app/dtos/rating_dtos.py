@@ -15,6 +15,7 @@ class RatingCreateDto(BaseModel):
     )
     review: Optional[str] = Field(default=None, max_length=100)
     variant_id: Optional[int] = Field(default=None, ge=1)
+    order_item_id: Optional[int] = Field(default=None, ge=1)
 
 class RatingInfoCreateDto(BaseModel):
     id: int
@@ -106,6 +107,20 @@ class EligibleRatingVariantsResponseDto(BaseModel):
     status_code: int = Field(default=200)
     message: str = Field(default="Varian dari pesanan selesai berhasil dimuat.")
     data: List[EligibleRatingVariantDto]
+
+
+class EligibleRatingOrderItemDto(BaseModel):
+    order_item_id: int
+    order_id: str
+    order_date: datetime
+    variant_id: Optional[int] = None
+    variant_name: str
+
+
+class EligibleRatingOrderItemsResponseDto(BaseModel):
+    status_code: int = Field(default=200)
+    message: str = Field(default="Item dari pesanan selesai berhasil dimuat.")
+    data: List[EligibleRatingOrderItemDto]
 
 
 

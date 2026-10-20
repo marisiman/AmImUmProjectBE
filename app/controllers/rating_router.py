@@ -43,6 +43,27 @@ def get_product_ratings(
 
 
 @router.get(
+    "/product/{product_id}/eligible-order-items",
+    response_model=rating_dtos.EligibleRatingOrderItemsResponseDto,
+    status_code=status.HTTP_200_OK,
+    summary="List the authenticated customer's completed eligible order items for rating",
+)
+def get_eligible_product_rating_order_items(
+    product_id: UUID,
+    jwt_token: Annotated[jwt_dto.TokenPayLoad, Depends(jwt_service.get_jwt_pyload)],
+    db: Session = Depends(get_db),
+):
+    result = rating_services.get_eligible_rating_order_items(
+        db=db,
+        product_id=str(product_id),
+        user_id=jwt_token.id,
+    )
+    if result.error:
+        raise result.error
+    return result.unwrap()
+
+
+@router.get(
     "/product/{product_id}/eligible-variants",
     response_model=rating_dtos.EligibleRatingVariantsResponseDto,
     status_code=status.HTTP_200_OK,

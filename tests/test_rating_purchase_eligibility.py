@@ -81,17 +81,17 @@ class DummyDB:
         instance.created_at = datetime.now(timezone.utc)
 
 
-def stub_eligible_variants(monkeypatch, rows):
+def stub_eligible_order_items(monkeypatch, rows):
     def eligible_rows(_db, product_id, user_id):
         return [
-            (101, "Tanpa Lampu", "Type_01")
+            (202, "order-1", datetime(2025, 1, 1, tzinfo=timezone.utc), 101, "Tanpa Lampu", "Type_01")
             for row in rows
             if row.product_id == product_id
             and row.customer_id == user_id
             and row.status == "completed"
         ]
 
-    monkeypatch.setattr(rating_service, "get_eligible_variant_rows", eligible_rows)
+    monkeypatch.setattr(rating_service, "get_eligible_order_item_rows", eligible_rows)
 
 
 def test_rating_is_rejected_when_user_has_no_eligible_completed_purchase(monkeypatch):
@@ -100,12 +100,12 @@ def test_rating_is_rejected_when_user_has_no_eligible_completed_purchase(monkeyp
         product=SimpleNamespace(id=str(product_id)),
         purchase_rows=[],
     )
-    stub_eligible_variants(monkeypatch, db.purchase_rows)
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
 
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),
-        RatingCreateDto(rate=5, review="Ulasan pembeli"),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", order_item_id=202, variant_id=101),
         user_id="user-1",
     )
 
@@ -136,12 +136,12 @@ def test_rating_requires_matching_buyer_product_and_completed_status(monkeypatch
         product=SimpleNamespace(id=str(product_id)),
         purchase_rows=[SimpleNamespace(**row)],
     )
-    stub_eligible_variants(monkeypatch, db.purchase_rows)
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
 
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),
-        RatingCreateDto(rate=5, review="Ulasan pembeli"),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", order_item_id=202, variant_id=101),
         user_id="user-1",
     )
 
@@ -163,11 +163,11 @@ def test_rating_is_created_for_matching_completed_purchase(monkeypatch):
             )
         ],
     )
-    stub_eligible_variants(monkeypatch, db.purchase_rows)
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),
-        RatingCreateDto(rate=5, review="Ulasan pembeli"),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", order_item_id=202, variant_id=101),
         user_id="user-1",
     )
 
@@ -175,7 +175,7 @@ def test_rating_is_created_for_matching_completed_purchase(monkeypatch):
     assert db.committed == 1
     assert len(db.added) == 1
     assert db.added[0].variant_id == 101
-    assert db.product_query.lock_requested is True
+    assert db.added[0].order_item_id == 202
 
 
 def test_existing_rating_is_rejected_and_customer_can_edit_instead(monkeypatch):
@@ -191,11 +191,11 @@ def test_existing_rating_is_rejected_and_customer_can_edit_instead(monkeypatch):
         ],
         existing_rating=SimpleNamespace(id=22),
     )
-    stub_eligible_variants(monkeypatch, db.purchase_rows)
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
     result = rating_service.create_rating(
         db,
         RatingCreateOfIdProductDto(product_id=product_id),
-        RatingCreateDto(rate=4, review="Ulasan kedua"),
+        RatingCreateDto(rate=4, review="Ulasan kedua", order_item_id=202, variant_id=101),
         user_id="user-1",
     )
 
@@ -203,3 +203,112 @@ def test_existing_rating_is_rejected_and_customer_can_edit_instead(monkeypatch):
     assert result.error.status_code == 409
     assert db.added == []
     assert db.committed == 0
+
+
+def test_legacy_variant_submission_resolves_unique_matching_order_item(monkeypatch):
+    product_id = uuid.uuid4()
+    db = DummyDB(product=SimpleNamespace(id=str(product_id)), purchase_rows=[])
+    monkeypatch.setattr(
+        rating_service,
+        "get_eligible_order_item_rows",
+        lambda *_: [
+            (202, "order-1", datetime(2025, 1, 1, tzinfo=timezone.utc), 101, "Tanpa Lampu", "Type_01"),
+            (303, "order-2", datetime(2025, 2, 1, tzinfo=timezone.utc), 102, "Dengan Lampu", "Type_02"),
+        ],
+    )
+
+    result = rating_service.create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=product_id),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", variant_id=101),
+        user_id="user-1",
+    )
+
+    assert result.error is None
+    assert db.added[0].order_item_id == 202
+    assert db.added[0].variant_id == 101
+
+
+def test_legacy_variant_submission_requires_selection_when_same_variant_has_repeat_purchases(monkeypatch):
+    product_id = uuid.uuid4()
+    db = DummyDB(product=SimpleNamespace(id=str(product_id)), purchase_rows=[])
+    monkeypatch.setattr(
+        rating_service,
+        "get_eligible_order_item_rows",
+        lambda *_: [
+            (202, "order-1", datetime(2025, 1, 1, tzinfo=timezone.utc), 101, "Tanpa Lampu", "Type_01"),
+            (303, "order-2", datetime(2025, 2, 1, tzinfo=timezone.utc), 101, "Tanpa Lampu", "Type_01"),
+        ],
+    )
+
+    result = rating_service.create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=product_id),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", variant_id=101),
+        user_id="user-1",
+    )
+
+    assert result.error is not None
+    assert result.error.status_code == 422
+    assert db.added == []
+    assert db.committed == 0
+
+
+def test_only_order_item_unique_constraint_is_reported_as_duplicate(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    product_id = uuid.uuid4()
+    db = DummyDB(
+        product=SimpleNamespace(id=str(product_id)),
+        purchase_rows=[SimpleNamespace(product_id=str(product_id), customer_id="user-1", status="completed")],
+    )
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
+
+    def fail_commit():
+        raise IntegrityError(
+            "insert",
+            {},
+            SimpleNamespace(diag=SimpleNamespace(constraint_name="uq_ratings_order_item_id")),
+        )
+
+    db.commit = fail_commit
+    result = rating_service.create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=product_id),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", order_item_id=202, variant_id=101),
+        user_id="user-1",
+    )
+
+    assert result.error is not None
+    assert result.error.status_code == 409
+    assert result.error.detail["message"].startswith("Item pesanan ini sudah diberi rating")
+
+
+def test_unrelated_integrity_error_is_not_reported_as_duplicate_rating(monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    product_id = uuid.uuid4()
+    db = DummyDB(
+        product=SimpleNamespace(id=str(product_id)),
+        purchase_rows=[SimpleNamespace(product_id=str(product_id), customer_id="user-1", status="completed")],
+    )
+    stub_eligible_order_items(monkeypatch, db.purchase_rows)
+
+    def fail_commit():
+        raise IntegrityError(
+            "insert",
+            {},
+            SimpleNamespace(diag=SimpleNamespace(constraint_name="some_other_constraint")),
+        )
+
+    db.commit = fail_commit
+    result = rating_service.create_rating(
+        db,
+        RatingCreateOfIdProductDto(product_id=product_id),
+        RatingCreateDto(rate=5, review="Ulasan pembeli", order_item_id=202, variant_id=101),
+        user_id="user-1",
+    )
+
+    assert result.error is not None
+    assert result.error.status_code == 500
+    assert "Item pesanan ini sudah diberi rating" not in result.error.detail["message"]
