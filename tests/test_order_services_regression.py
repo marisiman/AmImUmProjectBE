@@ -41,6 +41,7 @@ class DummyDB:
     def __init__(self, execute_results=None, query_result=None):
         self.execute_results = list(execute_results or [])
         self.query_result = query_result
+        self.executed_statements = []
         self.added = []
         self.deleted = []
         self.committed = 0
@@ -48,6 +49,7 @@ class DummyDB:
         self.refreshed = []
 
     def execute(self, stmt):
+        self.executed_statements.append(stmt)
         if not self.execute_results:
             return DummyExecuteResult([])
         return DummyExecuteResult(self.execute_results.pop(0))
@@ -175,6 +177,22 @@ def test_checkout_creates_order_and_items(monkeypatch, checkout_module, fake_car
     assert len(db.added) == 2
     assert db.deleted == [fake_cart_item]
     assert fake_cart_item.is_active is True
+
+
+def test_checkout_locks_active_cart_rows_to_prevent_duplicate_orders(monkeypatch, checkout_module, fake_cart_item):
+    shipment = SimpleNamespace(id=None, shipping_cost=0)
+    db = DummyDB(execute_results=[[fake_cart_item]], query_result=shipment)
+    monkeypatch.setattr(
+        checkout_module,
+        "get_cart_total",
+        lambda items: SimpleNamespace(total_all_active_prices=9000),
+    )
+    monkeypatch.setattr(checkout_module, "redis_client", None)
+
+    result = checkout_module.checkout(db, "user-1")
+
+    assert result.error is None
+    assert db.executed_statements[0]._for_update_arg is not None
 
 
 def test_checkout_deletes_duplicate_cart_rows_for_purchased_product_variant(monkeypatch, checkout_module, fake_cart_item):

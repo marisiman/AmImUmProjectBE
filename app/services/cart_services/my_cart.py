@@ -92,7 +92,7 @@ def my_cart(
         _delete_stale_checked_out_cart_rows(db, user_id)
 
         # Redis key for caching
-        redis_key = f"cart:{user_id}:{skip}:{limit}"
+        redis_key = f"cart:{user_id}:{skip}:{limit}:v2"
 
         # Check if wishlist data exists in Redis
         cached_cart = None
@@ -135,6 +135,8 @@ def my_cart(
         cart_dto = [
             cart_dtos.CartInfoDetailDto(
                 id=cart_item.id,
+                product_id=cart_item.product_id,
+                variant_id=cart_item.variant_id,
                 product_name=cart_item.product_name,
                 product_price=float(cart_item.product_price or 0),
                 variant_info=cart_item.variant_info,

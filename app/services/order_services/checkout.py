@@ -83,6 +83,7 @@ def checkout(
                 CartProductModel.customer_id == user_id,
                 CartProductModel.is_active == True
             )
+            .with_for_update()
         ).scalars().all()
 
         if not cart_items:

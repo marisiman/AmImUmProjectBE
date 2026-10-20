@@ -23,6 +23,8 @@ class CartResponseCreateDto(BaseModel):
 
 class CartInfoDetailDto(BaseModel):
     id: int
+    product_id: str
+    variant_id: int
     product_name: Optional[str] = None
     product_price: Optional[float] = 0
     variant_info: Optional[Dict[str, Any]]
