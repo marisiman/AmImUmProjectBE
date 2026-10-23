@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import HTTPException, status
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, raiseload
 
 from app.dtos.error_response_dtos import ErrorResponseDto
 from app.dtos.rating_dtos import (
@@ -47,17 +47,6 @@ def get_product_ratings(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     error="Invalid Rating Query",
                     message="Filter rating atau pagination belum valid.",
-                ).model_dump(),
-            )
-
-        product_exists = db.query(ProductModel.id).filter(ProductModel.id == product_id).first()
-        if not product_exists:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=ErrorResponseDto(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    error="Not Found",
-                    message="Produk tidak ditemukan.",
                 ).model_dump(),
             )
 
@@ -145,12 +134,22 @@ def get_product_ratings(
                 func.coalesce(func.sum(case((RatingModel.rate == star, 1), else_=0)), 0)
                 for star in range(1, 6)
             ],
+            select(ProductModel.id).filter(ProductModel.id == product_id).exists(),
         ]
         summary_row = (
             db.query(*summary_fields)
             .filter(*one_rating_per_order_item_filter)
             .one()
         )
+        if not summary_row[-1]:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ErrorResponseDto(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    error="Not Found",
+                    message="Produk tidak ditemukan.",
+                ).model_dump(),
+            )
         distribution = {
             star: int(summary_row[star + 1] or 0)
             for star in range(1, 6)
@@ -175,6 +174,7 @@ def get_product_ratings(
             )
             .join(UserModel, UserModel.id == RatingModel.user_id)
             .outerjoin(PackTypeModel, PackTypeModel.id == RatingModel.variant_id)
+            .options(raiseload("*"))
             .filter(*one_rating_per_order_item_filter)
         )
         if rate is not None:
@@ -185,6 +185,8 @@ def get_product_ratings(
             .offset(skip)
             .limit(limit + 1)
             .all()
+            if summary.total_rater > 0
+            else []
         )
         has_more = len(rows) > limit
         reviews = [

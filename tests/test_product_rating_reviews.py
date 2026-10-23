@@ -3,7 +3,7 @@ from importlib import import_module
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from pydantic import ValidationError
@@ -825,3 +825,56 @@ def test_my_rating_list_ignores_a_stale_page_written_after_cache_invalidation(mo
     assert second_result.error is None
     updated_rating = next(rating for rating in second_result.unwrap().data if rating.id == 1)
     assert updated_rating.review == "Ulasan berubah saat pemuatan"
+
+
+def test_public_rating_read_uses_two_database_roundtrips_for_rated_product(rating_db):
+    db, product_id = rating_db
+    statements = []
+    engine = db.get_bind()
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        result = rating_service.get_product_ratings(db, product_id, skip=0, limit=10)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert result.error is None
+    assert len(statements) == 2
+
+
+def test_public_rating_read_uses_two_roundtrips_for_product_without_verified_reviews(rating_db):
+    db, product_id = rating_db
+    empty_product_id = (
+        db.query(ProductModel.id)
+        .filter(ProductModel.id != product_id)
+        .scalar()
+    )
+    statements = []
+    engine = db.get_bind()
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        result = rating_service.get_product_ratings(db, empty_product_id, skip=0, limit=10)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert result.error is None
+    payload = result.unwrap()
+    assert payload.summary.total_rater == 0
+    assert payload.data == []
+    assert len(statements) == 1
+
+
+def test_public_rating_read_keeps_not_found_for_missing_product(rating_db):
+    db, _product_id = rating_db
+
+    result = rating_service.get_product_ratings(db, str(uuid4()), skip=0, limit=10)
+
+    assert result.error is not None
+    assert getattr(result.error, "status_code", None) == 404
