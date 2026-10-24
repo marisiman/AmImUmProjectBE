@@ -89,10 +89,12 @@ def create_user(db: Session, user: user_dtos.UserCreateDto) -> optional.Optional
         )
         if email_delivery_warning:
             success_message = (
-                f"Account is not yet active.\n"
-                f"Your verification code is {verification_code}.\n"
-                f"{email_delivery_warning}"
+                "Account is not yet active.\n"
+                "The verification email could not be sent automatically. "
+                "Please request a new verification email later."
             )
+            if app_development:
+                success_message += f"\nVerification code: {verification_code}"
         elif app_development:
             success_message = (
                 f"{success_message}\n"
